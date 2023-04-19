@@ -1,0 +1,9 @@
+beautifulsoup4
+playwright
+!playwright install
+pandas
+numpy
+scikit-learn
+matplotlib
+sklearn
+seaborn
