@@ -1,0 +1,39 @@
+MP - Minutes Played
+FG - Field Goal
+FGA - Field Goal Attempts
+FG% - Field Goal Percentage
+3P - Three point field goals
+3PA - Three point field goal attempts
+3P% - three point field goals percentage
+FT - Free throws
+FTA - Free throws attempt
+FT% - free throws percentage
+ORB - Offensive Rebounds
+DRB - Defensive Rebounds
+TRB - Total Rebounds
+AST - Assists
+STL - steals
+BLK - blocks
+TOV - turnover
+PF - personal foul
+PTS - points
++/- - Plus/Minus
+MP - Minutes Played
+TS% - True Shoot Percentage
+eFG% - Effective Field Goal Percentage
+3PAr - Three points attempt rate
+FTr - Free throw attempt rate
+ORB% - Offensive rebound percentage
+DRB% - Deffensive rebound percentage
+TRB% - total rebound percentage
+AST% - assist percentage
+STL% - steal percentage
+BLK% - block percentage
+TOV% - turnover percentage
+USG% - Usage percentage
+ORtg - Offensive ratng
+DRtg - deffensive rating
+BPM - box minus/plus
+opp - opponent team
+season - years of the season
+date -date of the game
