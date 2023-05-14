@@ -4,19 +4,16 @@ from bs4 import BeautifulSoup
 import math
 import re
 
-SCORE_DIR = "data/SCORES"
-PLAYERS_DIR = "data/PLAYERS"
+SCORE_DIR = "data/scores"
 
 box_scores = os.listdir(SCORE_DIR)
 box_scores = [os.path.join(SCORE_DIR, f) for f in box_scores if f.endswith(".html")]
-player_scores = os.listdir(PLAYERS_DIR)
-
 
 def parse_html(box_score):
-    with open(box_score, encoding=None, errors="replace") as f:
+    with open(box_score) as f:
         html = f.read()
 
-    soup = BeautifulSoup(html,features="html.parser")
+    soup = BeautifulSoup(html)
     [s.decompose() for s in soup.select("tr.over_header")]
     [s.decompose() for s in soup.select("tr.thead")]
     return soup
@@ -50,15 +47,13 @@ def MP_converter(time):
         total = math.floor(total * 100) / 100
     return total
 
-
 def read_stats(soup, team, stat):
     df = pd.read_html(str(soup), attrs={'id': f'box-{team}-game-{stat}'}, index_col=0)[0]
     df['MP'] = df['MP'].apply(MP_converter)
     df = df.apply(pd.to_numeric, errors="coerce")
     return df
 
-
-players = {}
+finalDF = pd.DataFrame()
 
 for box_score in box_scores:
     soup = parse_html(box_score)
@@ -75,27 +70,22 @@ for box_score in box_scores:
             summary = pd.concat([basic, advanced], axis=1, join='inner')
             if team == teams[0]:
                 summary["opp"] = teams[1]
+                summary["team"] = teams[0]
             else:
                 summary["opp"] = teams[0]
+                summary["team"] = teams[1]
             summary["season"] = read_season_info(soup)
             summary["date"] = os.path.basename(box_score)[:8]
             summary["date"] = pd.to_datetime(summary["date"], format="%Y%m%d")
             summary.drop("team totals", inplace=True)
-            for i in range(summary.shape[0]):
-                nome = summary.iloc[i].name
-                dados = summary.iloc[i].to_frame().T
-                if nome not in players:
-                    players[nome] = dados
-                else:
-                    players[nome] = pd.concat([players[nome], dados])
-    except:
-        continue
+            summary.reset_index(inplace=True)
+            finalDF = pd.concat([finalDF, summary], ignore_index=True)
+            
 
-for s in players.keys():
-    players[s] = players[s].sort_values(by='date')
-    players[s] = players[s].reset_index(drop=True)
-    csv_name = "data/PLAYERS/" + s + ".csv"
-    try:
-        players[s].to_csv(csv_name)
-    except:
-        print("Erro no jogador "+ csv_name)
+
+    except Exception as e:
+            print(f"Error processing {team} stats for {os.path.basename(box_score)[:8]}: {str(e)}")
+
+finalDF = finalDF.rename(columns={"Starters": "Name"})
+
+finalDF.to_csv("data\\bigDados.csv", index=False)
