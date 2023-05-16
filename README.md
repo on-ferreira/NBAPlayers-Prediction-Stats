@@ -22,6 +22,7 @@ python get_datapy.py
 2. Run the script to clean and process the data:
 
 python parse_data.py
+The data parsed can be found in https://drive.google.com/file/d/1V4GDOIA3l612NDdjtbWGUlJn-ND2b7F9/view?usp=sharing if you don't want to do it manually. [Seasons 2016 until the beginning of season 2023]
 
 3. Run the script to train and evaluate the ML model: [Under development]
 
