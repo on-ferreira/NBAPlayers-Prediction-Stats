@@ -125,4 +125,4 @@ finalDF.to_csv("data\\DFwithHourandLocation.csv", index=False)
 
 actual_hour2 = datetime.datetime.now()
 diff = actual_hour2 - actual_hour
-print(f"Duration of Script - {diff} \n Parsed Files: {len(box_scores)}")
+print(f"Duration of Script - {diff} \nParsed Files: {len(box_scores)}")
