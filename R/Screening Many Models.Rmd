@@ -1,0 +1,594 @@
+---
+title: "Single Player Modeling"
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(BasketballAnalyzeR) 
+library(gridExtra)
+library(tidymodels)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(modelr)
+library(gapminder)
+library(recipes)
+library(conflicted)
+library(ranger)
+library(rules)
+library(baguette)
+library(glmnet)
+library(kernlab)
+library(kknn)
+library(future)
+```
+
+
+```{r reading csv}
+
+df <- read_csv("data/DFwithHourandLocation.csv")  
+df$'Unnamed: 16' <- NULL
+df$date <- as.Date(df$date)
+
+# Trim spaces and replace with underscores in 'Name' column
+df$Name <- gsub(" ", "_", trimws(df$Name))
+
+#Removing rows where the MP =0 or MP = NA
+df <- subset(df, !is.na(MP) & MP != 0)
+
+df
+```
+Percebi que tenho um problema no DF original devido ao scrapping the identificado padrões idiomáticos diferentes, por exemplo temos como unique name 'nikola_joki?' e nikola_jokić que deveriam ser representados como um jogador e não como 2.
+
+
+```{r identifying similar players names}
+# Identify unique players in the main_df
+unique_players <- unique(df$Name)
+
+# Loop through each unique player
+for (player in unique_players) {
+  # Check if there are any similar player names
+  similar_names <- agrep(player, unique_players, max.distance = 0.2, value = TRUE)
+  
+  # If there are similar names, correct them
+  if (length(similar_names) > 1) {
+    # Print the similar names for reference
+    print(similar_names)
+    
+  }
+}
+
+
+```
+Agora que já sabemos quais são os jogadores que estão dando problema no nome, podemos criar uma regra para corrigir eles de uma vez.
+```{r fixing players names}
+
+fix_player_names <- function(data) {
+  name_mapping <- c(
+    "mirza_teletović" = "mirza_teletovic",
+    "mirza_teletovi?" = "mirza_teletovic",
+    "boban_marjanović" = "boban_marjanovic",
+    "boban_marjanovi?" = "boban_marjanovic",
+    "bojan_bogdanović" = "bojan_bogdanovic",
+    "bojan_bogdanovi?" = "bojan_bogdanovic",
+    "goran_dragić" = "goran_dragic",
+    "goran_dragi?" = "goran_dragic",
+    "jusuf_nurkić" = "jusuf_nurkic",
+    "jusuf_nurki?" = "jusuf_nurkic",
+    "nikola_jokić" = "nikola_jokic",
+    "nikola_joki?" = "nikola_jokic",
+    "dario_šarić" = "dario_saric",
+    "dario_šari?" = "dario_saric",
+    "dario_교ri?" = "dario_saric",
+    "miloš_teodosi?" = "milos_teodosic",
+    "miloš_teodosić" = "milos_teodosic",
+    "ante_žiži?" = "ante_zizic",
+    "ante_žižić" = "ante_zizic",
+    "bogdan_bogdanovi?" = "bogdan_bogdanovic",
+    "bogdan_bogdanović" = "bogdan_bogdanovic",
+    "nikola_mirotić" = "nikola_mirotic",
+    "nikola_miroti?" = "nikola_mirotic",
+    "donatas_motiej?nas" = "donatas_motiejunas",
+    "donatas_motiejūnas" = "donatas_motiejunas",
+    "ersan_i̇lyasova" = "ersan_ilyasova",
+    "ersan_?lyasova" = "ersan_ilyasova", 
+    "nikola_vučević" = "nikola_vucevic",
+    "nikola_vu?evi?" = "nikola_vucevic",
+    "jonas_valančiūnas" = "jonas_valanciunas",
+    "jonas_valan?i?nas" = "jonas_valanciunas",
+    "dāvis_bertāns" = "davis_bertans",
+    "d?vis_bert?ns" = "davis_bertans",
+    "dairis_bert?ns" = "davis_bertans",
+    "kristaps_porziņģis" = "kristaps_porzingis",
+    "kristaps_porzi??is" = "kristaps_porzingis",
+    "dairis_bert?ns" = "dairis_bertans",
+    "damjan_rudež" = "damjan_rudez",
+    "sasha_vujačić" = "sasha_vujacic",
+    "nikola_peković" = "nikola_pekovic",
+    "tomáš_satoranský" = "tomas,satoransky",
+    "luka_don?i?" = "luka_doncic",
+    "džanan_musa" = "dzanan_musa",
+    "vlatko_?an?ar" = "vlatko_cancar",
+    "anžejs_pase??iks" = "anzejs_pasecnkis",
+    "alen_smailagi?" = "alen_smailagic",
+    "luka_šamani?" = "luka_samanic",
+    "alperen_?engün" = "alperen_sengun"
+  )
+  
+  data$Name <- ifelse(data$Name %in% names(name_mapping), name_mapping[data$Name], data$Name)
+  
+  return(data)
+}
+
+# Call the fix_player_names() function to fix the names in the "data" data frame
+df <- fix_player_names(df)
+
+
+
+```
+Checking if some name was forgotten on the new df df
+
+```{r}
+# Identify unique players in the main_df
+unique_players2 <- unique(df$Name)
+
+# Loop through each unique player
+for (player in unique_players2) {
+  # Check if there are any similar player names
+  similar_names2 <- agrep(player, unique_players2, max.distance = 0.05, value = TRUE)
+  
+  # If there are similar names, correct them
+  if (length(similar_names2) > 1) {
+    # Print the similar names for reference
+    print(similar_names2)
+    
+  }
+}
+print('---')
+#Doing an extra check to see if there are any players with "?" or the problematic characters in the name
+# A list of some players were found and add on the fix_data function
+for (player in unique_players2) {
+
+  if (grepl("\\?|ć|ž|č|ū|ā|ģ|š|ü|교", player)) {
+    # Print the player names with non-UTF-8 characters
+    print(player)
+
+  }
+}
+```
+
+
+Overview of the data
+```{r overview}
+# Summary of the DataFrame
+summary_df <- summary(df)
+print(summary_df)
+```
+Data Cleaning:
+Notei que as colunas númericas estão ficando com NA ao invés de 0 no df, abaixo vou preenche-las com 0 e investigar o caso onde AST% = -1000. Depois de investigar, eu acredito que esses valores negativos sejam algum tipo de bug na tabela original, portanto a % será transformada em 0
+Edit: Após conversa com o professor, decidimos remover, por enquanto, as colunas de % para evitar o possível conflito onde 0Sucessos/0Tentativas = 0% e 0Sucessos/VáriasTentativas = 0%.
+```{r}
+
+# Fill NA values with 0 in the specified columns
+df$PF <- replace(df$PF, is.na(df$PF), 0)
+df$'TS%' <- replace(df$'TS%', is.na(df$'TS%'), 0)
+df$'eFG%' <- replace(df$'eFG%', is.na(df$'eFG%'), 0)
+df$FTr <- replace(df$FTr, is.na(df$FTr), 0)
+df$BPM <- replace(df$BPM, is.na(df$BPM), 0)
+df$'3PAr' <- replace(df$'3PAr', is.na(df$'3PAr'), 0)
+df$'AST%' <- replace(df$'AST%', is.na(df$'AST%'), 0)
+df$'TOV%' <- replace(df$'TOV%', is.na(df$'TOV%'), 0)
+df$'+/-' <- replace(df$'+/-', is.na(df$'+/-'),0)
+
+
+# Replace negative values with 0 in the filtered DataFrame
+df$'AST%'[df$'AST%' < 0] <- 0
+
+
+# Remove specified columns of FG%, X3P% and FT%
+df <- df %>%
+  select(-c('FG%', '3P%', 'FT%'))
+
+
+# Remove duplicate rows
+df <- distinct(df)
+
+
+summary2_df <- summary(df)
+print(summary2_df)
+
+
+```
+
+
+
+Criando colunas de mês dentro da season
+```{r}
+
+# Extract the year and month from the date column
+df <- df %>%
+  mutate(year = lubridate::year(date),
+         month = lubridate::month(date),
+         day = lubridate::day(date))
+
+# Find the unique combinations of season and year to determine the season start months
+season_start_dates <- df %>%
+  distinct(season, year, month)
+
+season_start_dates$season_month <- 1
+
+# Initialize the counter for season and month
+current_season <- season_start_dates$season[1] #2016
+current_season_month <- 1
+
+# Loop through each row in the dataframe
+for (i in 1:nrow(season_start_dates)) {
+  # Check if the season and month have changed
+  if (season_start_dates$season[i] != current_season) {
+    current_season_month <- 1
+    current_season <- season_start_dates$season[i]
+    current_season_month <- current_season_month + 1
+  }
+  else{
+    season_start_dates$season_month[i] <- current_season_month
+    current_season_month <- current_season_month + 1
+  }
+}
+
+# Join season_start_dates with df
+df <- df %>%
+  left_join(season_start_dates, by = c("season", "year","month"))
+
+df
+
+
+```
+
+Usarei a função nest() para agrupar o df por jogador
+```{r nest}
+
+# Assuming your dataframe is named df
+nested_df <- df %>% 
+  group_by(Name) %>% 
+  nest(.key="data")
+
+# Print the nested data
+nested_df
+
+```
+Criando colunas extras no nest para total de jogos e minutos jogados para cada jogador
+```{r}
+# Define a function to calculate the sum of MP
+sum_MP <- function(data) {
+  sum(data$MP)
+}
+
+# Define a function to count the occurrences of the player
+count <- function(data) {
+  nrow(data)
+}
+
+nested_df <- nested_df %>%
+  mutate(sum_MP = map_dbl(data, sum_MP),
+         count = map_int(data, count))
+
+
+# Print the nested data with sum_MP and count columns
+nested_df
+
+```
+
+Criando Feature Engineering columns
+```{r feature engineering}
+
+# Function to calculate rest days
+calculate_rest_days <- function(data) {
+  data$rest_days <- c(0, diff(data$date))
+  return(data)
+}
+
+# Apply the calculate_rest_days function to nested_df
+nested_df <- nested_df %>%
+  mutate(data = purrr::map(data, ~ calculate_rest_days(.)))
+
+#Creating the columns next_opp and next_PTS 
+nested_df <- nested_df %>%
+  mutate(data = map(data, ~ {
+    df <- .x
+    df$next_opp <- c(df$opp[-1], NA)
+    df$next_PTS <- c(df$PTS[-1], NA)
+    df
+  }))
+
+
+# View the updated nested_df with the rest_days column within each nested dataset
+nested_df
+```
+
+```{r}
+player_name <- "nikola_jokic"
+
+# Filter the nested data for "nikola_jokic"
+player_df <- nested_df %>% 
+  dplyr::filter(Name == player_name) %>%
+  pull(data) %>%
+  pluck(1)
+
+#Removing the last game row that will contain NA in next_PTS
+player_df <- player_df %>% slice(-n())
+
+
+# Count unique values for each variable
+unique_counts <- sapply(player_df, function(x) length(unique(x)))
+
+# Identify columns with only one unique value
+columns_to_drop <- names(unique_counts[unique_counts == 1]) 
+#In this case is only the team column, I'm droping some columns that were previously dropped in the recipe() but they are generating weird errors in the workflow_set, so I'll drop it now to save effort later.
+player_df <- player_df %>%
+  mutate(hour_of_game = hour(hour))
+
+player_df$team <- NULL
+player_df$date <- NULL
+player_df$location <- NULL
+player_df$hour <- NULL
+
+
+# Print the nested data for "nikola_jokic"
+print(player_df)
+
+set.seed(502)
+player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+player_df_train <- training(player_df_split)
+player_df_test <- testing(player_df_split)
+
+set.seed(1001)
+player_folds <- vfold_cv(player_df_train, v = 10, repeats = 5)
+
+```
+
+ 
+A good strategy is to spend some initial effort trying a variety
+of modeling approaches, determine what works best, then invest
+additional time tweaking/optimizing a small set of models.
+
+Cap. 15 Screening ManyModels
+
+```{r}
+
+normalized_rec <-
+ recipe(next_PTS ~ ., data = player_df_train) %>%
+ step_dummy(all_nominal_predictors(), one_hot = TRUE, skip = TRUE) %>%
+ step_normalize(all_predictors())
+
+poly_recipe <-
+ normalized_rec %>%
+ step_poly(all_predictors()) %>%
+ step_interact(~ all_predictors():all_predictors())
+
+
+```
+For the models, we use the the parsnip add-in to create a set of model specifications:
+
+```{r}
+linear_reg_spec <-
+ linear_reg(penalty = tune(), mixture = tune()) %>%
+ set_engine("glmnet")
+
+nnet_spec <-
+ mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+ set_engine("nnet", MaxNWts = 2600) %>%
+ set_mode("regression")
+
+mars_spec <-
+ mars(prod_degree = tune()) %>% #<- use GCV to choose terms
+ set_engine("earth") %>%
+ set_mode("regression")
+
+svm_r_spec <-
+ svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+svm_p_spec <-
+ svm_poly(cost = tune(), degree = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+knn_spec <-
+ nearest_neighbor(neighbors = tune(), dist_power = tune(), weight_func = tune()) %>%
+ set_engine("kknn") %>%
+ set_mode("regression")
+
+cart_spec <-
+ decision_tree(cost_complexity = tune(), min_n = tune()) %>%
+ set_engine("rpart") %>%
+ set_mode("regression")
+
+bag_cart_spec <-
+ bag_tree() %>%
+ set_engine("rpart", times = 50L) %>%
+ set_mode("regression")
+
+rf_spec <-
+ rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+ set_engine("ranger") %>%
+ set_mode("regression")
+
+xgb_spec <-
+ boost_tree(tree_depth = tune(), learn_rate = tune(), loss_reduction = tune(),
+ min_n = tune(), sample_size = tune(), trees = tune()) %>%
+ set_engine("xgboost") %>%
+ set_mode("regression")
+
+cubist_spec <-
+ cubist_rules(committees = tune(), neighbors = tune()) %>%
+ set_engine("Cubist")
+
+
+```
+
+Adicionando hidden_units na NN
+
+```{r}
+
+nnet_param <-
+ nnet_spec %>%
+ extract_parameter_set_dials() %>%
+ update(hidden_units = hidden_units(c(1, 27)))
+
+```
+
+
+Non-Linear models
+
+```{r}
+normalized <-
+ workflow_set(
+ preproc = list(normalized = normalized_rec),
+ models = list(SVM_radial = svm_r_spec, SVM_poly = svm_p_spec,
+ KNN = knn_spec, neural_network = nnet_spec)
+ )
+normalized
+```
+
+```{r}
+normalized %>% extract_workflow(id = "normalized_KNN")
+
+```
+Adicionando NN parameter object
+
+```{r}
+normalized <-
+ normalized %>%
+ option_add(param_info = nnet_param, id = "normalized_neural_network")
+normalized
+```
+
+```{r}
+model_vars <-
+ workflow_variables(outcomes = next_PTS,
+ predictors = everything())
+
+no_pre_proc <-
+ workflow_set(
+ preproc = list(simple = model_vars),
+ models = list(MARS = mars_spec,
+ CART = cart_spec,
+ CART_bagged = bag_cart_spec,
+ RF = rf_spec,
+ boosting = xgb_spec,
+ Cubist = cubist_spec)
+ )
+no_pre_proc
+```
+Finally, we assemble the set that uses nonlinear terms and interactions with the
+appropriate models:
+```{r}
+with_features <-
+ workflow_set(
+ preproc = list(full_quad = poly_recipe),
+ models = list(linear_reg = linear_reg_spec, KNN = knn_spec)
+ )
+```
+These objects are tibbles with the extra class of workflow_set. Row binding does not
+affect the state of the sets, and the result is itself a workflow set:
+
+```{r}
+all_workflows <-
+ bind_rows(no_pre_proc, normalized, with_features) %>%
+ # Make the workflow IDs a little more simple:
+ mutate(wflow_id = gsub("(simple_)|(normalized_)", "", wflow_id))
+all_workflows
+```
+
+Criando grid control e grid results
+```{r}
+
+
+grid_ctrl <-
+ control_grid(
+ save_pred = TRUE,
+ parallel_over = "everything",
+ save_workflow = TRUE
+ )
+
+grid_results <-
+ all_workflows %>%
+ workflow_map(
+ seed = 1503,
+ resamples = player_folds,
+ grid = 25,
+ control = grid_ctrl
+ )
+
+```
+
+```{r}
+show_notes(.Last.tune.result)
+```
+
+The results show that the option and result columns have been updated:
+
+```{r}
+
+grid_ctrl <-
+ control_grid(
+ save_pred = TRUE,
+  parallel_over = "sequential",
+ save_workflow = TRUE
+ )
+
+full_results_time <-
+ system.time(
+ grid_results <-
+ all_workflows %>%
+ workflow_map(seed = 1503, resamples = player_folds, grid = 25,
+ control = grid_ctrl, verbose = TRUE)
+ )
+
+
+#Parou de funcionar aqui, as coisas daqui pra baixo foi que coletei do livro e já deixei pronto assim que consertar essa parte de cima.
+```
+
+```{r}
+num_grid_models <- nrow(collect_metrics(grid_results, summarize = FALSE))
+
+```
+
+```{r}
+grid_results
+```
+
+Avaliando resultado doss modelos:
+```{r}
+grid_results %>%
+ rank_results() %>%
+ filter(.metric == "rmse") %>%
+ select(model, .config, rmse = mean, rank)
+```
+
+rmsw x Workflow Rank
+
+```{r}
+autoplot(
+ grid_results,
+ rank_metric = "rmse", # <- how to order models
+ metric = "rmse", # <- which metric to visualize
+ select_best = TRUE # <- one point per workflow
+) +
+ geom_text(aes(y = mean - 1/2, label = wflow_id), angle = 90, hjust = 1) +
+ lims(y = c(3.5, 9.5)) +
+ theme(legend.position = "none")
+```
+
+autoplot() for Cubist:
+```{r}
+autoplot(grid_results, id = "Cubist", metric = "rmse")
+
+```
+
