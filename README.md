@@ -45,8 +45,6 @@ Users are advised to exercise their own judgment and discretion when using the p
 
 ### References
 
-If you used third-party resources or tools, include the references and credits in this space. For example:
-
 This project uses VikParuchuri's scraping script as a base. Reference: https://github.com/dataquestio/project-walkthroughs/tree/master/nba_games
 
 This project uses Basketball-Reference as a base of data. Reference: https://www.basketball-reference.com
@@ -113,7 +111,6 @@ O NBA Predictions Project destina-se apenas a fins de entretenimento. Quaisquer 
 Os usuários são aconselhados a exercer seu próprio julgamento e discrição ao usar o projeto e a usar as previsões por sua própria conta e r
 
 ### Referências
-Se você usou recursos ou ferramentas de terceiros, inclua as referências e créditos neste espaço. Por exemplo:
 
 Este projeto usa como base de scraping o script de VikParuchuri. Referência: https://github.com/dataquestio/project-walkthroughs/tree/master/nba_games
 

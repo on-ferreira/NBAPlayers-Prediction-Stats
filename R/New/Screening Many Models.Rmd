@@ -1,0 +1,573 @@
+---
+title: "Single Player Modeling"
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(BasketballAnalyzeR) 
+library(gridExtra)
+library(tidymodels)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(modelr)
+library(gapminder)
+library(recipes)
+library(conflicted)
+library(ranger)
+library(rules)
+library(baguette)
+library(glmnet)
+library(kernlab)
+library(kknn)
+library(future)
+conflict_prefer("filter", winner = "dplyr")
+tidymodels_prefer(quiet = FALSE)
+
+```
+
+
+```{r reading csv}
+
+df <- read_csv("cleanedData.csv")  
+df
+```
+
+
+Usarei a função nest() para agrupar o df por jogador
+```{r nest}
+
+# Assuming your dataframe is named df
+nested_df <- df %>% 
+  group_by(Name) %>% 
+  nest(.key="data")
+
+# Print the nested data
+nested_df
+
+```
+Criando colunas extras no nest para total de jogos e minutos jogados para cada jogador
+```{r}
+# Define a function to calculate the sum of MP
+sum_MP <- function(data) {
+  sum(data$MP)
+}
+
+# Define a function to count the occurrences of the player
+count <- function(data) {
+  nrow(data)
+}
+
+nested_df <- nested_df %>%
+  mutate(sum_MP = map_dbl(data, sum_MP),
+         count = map_int(data, count))
+
+
+# Print the nested data with sum_MP and count columns
+nested_df
+
+```
+
+Criando Feature Engineering columns
+```{r feature engineering}
+
+# Function to calculate rest days
+calculate_rest_days <- function(data) {
+  data$rest_days <- c(0, diff(data$date))
+  return(data)
+}
+
+# Apply the calculate_rest_days function to nested_df
+nested_df <- nested_df %>%
+  mutate(data = purrr::map(data, ~ calculate_rest_days(.)))
+
+#Creating the columns next_opp and next_PTS 
+nested_df <- nested_df %>%
+  mutate(data = map(data, ~ {
+    df <- .x
+    df$next_opp <- c(df$opp[-1], NA)
+    df$next_PTS <- c(df$PTS[-1], NA)
+    df
+  }))
+
+
+# View the updated nested_df with the rest_days column within each nested dataset
+nested_df
+```
+
+```{r}
+player_name <- "nikola_jokic"
+
+# Filter the nested data for "nikola_jokic"
+player_df <- nested_df %>% 
+  dplyr::filter(Name == player_name) %>%
+  pull(data) %>%
+  pluck(1)
+
+#Removing the last game row that will contain NA in next_PTS
+player_df <- player_df %>% dplyr::slice(-n())
+
+
+# Count unique values for each variable
+unique_counts <- sapply(player_df, function(x) length(unique(x)))
+
+# Identify columns with only one unique value
+columns_to_drop <- names(unique_counts[unique_counts == 1]) 
+
+#In this case the player has only one team in the team column, so it's being a single factor and is causing trouble in the models. I'm droping some columns that were previously dropped in the recipe() but they are generating weird errors in the workflow_set, so I'll drop it now to save effort later.
+
+player_df$team <- NULL
+player_df$location <- NULL
+player_df$date <- NULL
+
+# Print the nested data for "nikola_jokic"
+print(player_df)
+
+
+```
+Converting home to boolean
+```{r}
+#player_df$home <- as.logical(player_df$home)
+```
+Convertion removed:
+Error in `maybe_matrix()`:
+! Some columns are non-numeric. The data cannot be converted to numeric matrix: 'home'.
+Backtrace:
+  1. generics::fit(lm_wflow_normalized, player_df_train)
+ 13. parsnip::maybe_matrix(x)
+
+
+
+```{r}
+
+set.seed(502)
+player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+player_df_train <- training(player_df_split)
+player_df_test <- testing(player_df_split)
+
+set.seed(1001)
+player_folds <- vfold_cv(player_df_train, v = 10, repeats = 5)
+
+```
+
+ 
+A good strategy is to spend some initial effort trying a variety
+of modeling approaches, determine what works best, then invest
+additional time tweaking/optimizing a small set of models.
+
+Cap. 15 Screening ManyModels
+
+
+```{r}
+
+# Contagem de pontos únicos em cada coluna
+num_unique <- sapply(player_df_train, n_distinct)
+
+# Exibir o número de pontos únicos em cada coluna
+print(num_unique)
+
+# Contar o número de valores distintos em cada coluna
+num_valores_distintos <- sapply(player_df_train, function(x) length(unique(x)))
+
+# Definir colunas a serem excluídas (binárias e com apenas 2 valores distintos)
+colunas_excluir <- c( names(num_valores_distintos[num_valores_distintos <= 2]))
+print(colunas_excluir)
+
+# Identificar as colunas que possuem mais de 2 valores distintos, excluindo colunas binárias e colunas com apenas 2 valores distintos
+colunas_distintas <- setdiff(names(num_valores_distintos[num_valores_distintos > 2]), colunas_excluir) %>%   setdiff(c("opp", "next_opp", "next_PTS"))
+
+
+  
+print(colunas_distintas)
+```
+
+
+
+```{r}
+
+normalized_rec <-
+ recipe(next_PTS ~ ., data = player_df_train) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) 
+
+
+poly_recipe <-
+ normalized_rec %>%
+  step_poly(colunas_distintas)
+
+
+```
+
+Testando os modelos um a um para encontrar onde está o erro:
+lm_model <- linear_reg() %>% set_engine("lm") <- OK
+
+hidden_units = tune()
+Error in sum(net$n) : invalid 'type' (list) of argument
+penalty = tune()
+Error in rep(decay, length(wts)) : 
+  attempt to replicate an object of type 'language'
+epochs = tune()
+Error in nnet.default(x, y, w, ...) : 
+  'language' object cannot be coerced to type 'integer'
+
+ 
+```{r}
+
+model <-
+ mlp(hidden_units = 2, penalty = 0.01, epochs = tune()) %>%
+ set_engine("nnet", MaxNWts = 2600) %>%
+ set_mode("regression")
+
+model_param <-
+ model %>%
+ extract_parameter_set_dials() %>%
+ update(hidden_units = hidden_units(c(1, 27)))
+
+
+wflow_normalized <-
+ workflow() %>%
+ add_model(model) %>%
+ add_recipe(normalized_rec)
+wflow_normalized
+
+wflow_poly <-
+ workflow() %>%
+ add_model(model) %>%
+ add_recipe(poly_recipe)
+wflow_poly
+
+
+fit_n <- fit(wflow_normalized, player_df_train)
+
+fit_p <- fit(wflow_poly, player_df_train)
+
+
+pdf_test_res_n <- predict(fit_n, player_df_test)
+pdf_test_res_n <- bind_cols(pdf_test_res_n, player_df_test %>% select(next_PTS))
+pdf_test_res_n
+
+pdf_test_res_p <- predict(fit_p, player_df_test)
+pdf_test_res_p <- bind_cols(pdf_test_res_p, player_df_test %>% select(next_PTS))
+pdf_test_res_p
+
+conflict_prefer("rmse", winner = "yardstick")
+conflict_prefer("rsq", winner = "yardstick")
+conflict_prefer("mae", winner = "yardstick")
+
+#tidymodels_prefer(quiet = FALSE)
+#• modelr::rmse
+#• yardstick::rmse
+player_metrics <- metric_set(rmse, rsq, mae)
+player_metrics(pdf_test_res_n, truth = next_PTS, estimate = .pred)
+player_metrics(pdf_test_res_p, truth = next_PTS, estimate = .pred)
+
+#Metrics    RMSE  /   RSQ   /   MAE
+#Metrics com poly e interact 494.80 / 0.0117 / 258.13
+#Metrics só com poly 9.62 / 0.127 / 7.32293
+#Metrics só com interact 523.23 / 0.00351 / 361.075
+#Removi o interact da poly_rec
+
+```
+
+ 22. base::stop("'degree' must be less than number of unique points")
+Vendo a quantidade de unique points das colunas
+Problema resolvido ao remover as colunas com <=2 valores únicos do df.
+
+
+Agora o problema está sendo no lm_fit_p
+
+Error in eval_tidy(env$formula[[2]], env$data) : object '.' not found
+Resolvido: Tinha esquecido de colocar next_PTS dentro do setdiff() em colunas distintas
+
+
+
+Erro ao tentar usar o fit() no modelo nnet_spec
+> fit_n <- fit(wflow_normalized, player_df_train)
+Error in sum(net$n) : invalid 'type' (list) of argument
+
+
+```{r}
+
+nnet_spec <-
+ mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+ set_engine("nnet", MaxNWts = 2600) %>%
+ set_mode("regression")
+
+params <- extract_parameter_set_dials(nnet_spec)
+params
+params %>% extract_parameter_dials("hidden_units")
+
+params %>% extract_parameter_dials("penalty")
+
+params %>% extract_parameter_dials("epochs")
+
+
+
+nnet_param <-
+ nnet_spec %>%
+ extract_parameter_set_dials() %>%
+ update(hidden_units = hidden_units(c(1, 27)))
+
+params <- extract_parameter_set_dials(nnet_spec)
+params
+params %>% extract_parameter_dials("hidden_units")
+
+
+
+```
+
+
+
+
+
+---------------------------------------------------------------------------
+
+
+
+For the models, we use the the parsnip add-in to create a set of model specifications:
+
+```{r}
+linear_reg_spec <-
+ linear_reg(penalty = tune(), mixture = tune()) %>%
+ set_engine("glmnet")
+
+nnet_spec <-
+ mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+ set_engine("nnet", MaxNWts = 2600) %>%
+ set_mode("regression")
+
+mars_spec <-
+ mars(prod_degree = tune()) %>% #<- use GCV to choose terms
+ set_engine("earth") %>%
+ set_mode("regression")
+
+svm_r_spec <-
+ svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+svm_p_spec <-
+ svm_poly(cost = tune(), degree = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+knn_spec <-
+ nearest_neighbor(neighbors = tune(), dist_power = tune(), weight_func = tune()) %>%
+ set_engine("kknn") %>%
+ set_mode("regression")
+
+cart_spec <-
+ decision_tree(cost_complexity = tune(), min_n = tune()) %>%
+ set_engine("rpart") %>%
+ set_mode("regression")
+
+bag_cart_spec <-
+ bag_tree() %>%
+ set_engine("rpart", times = 50L) %>%
+ set_mode("regression")
+
+rf_spec <-
+ rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+ set_engine("ranger") %>%
+ set_mode("regression")
+
+xgb_spec <-
+ boost_tree(tree_depth = tune(), learn_rate = tune(), loss_reduction = tune(),
+ min_n = tune(), sample_size = tune(), trees = tune()) %>%
+ set_engine("xgboost") %>%
+ set_mode("regression")
+
+cubist_spec <-
+ cubist_rules(committees = tune(), neighbors = tune()) %>%
+ set_engine("Cubist")
+
+
+```
+
+Adicionando hidden_units na NN
+
+```{r}
+
+nnet_param <-
+ nnet_spec %>%
+ extract_parameter_set_dials() %>%
+ recipes::update(hidden_units = hidden_units(c(1, 27)))
+
+```
+
+
+Non-Linear models
+
+```{r}
+normalized <-
+ workflow_set(
+ preproc = list(normalized = normalized_rec),
+ models = list(SVM_radial = svm_r_spec, SVM_poly = svm_p_spec,
+ KNN = knn_spec, neural_network = nnet_spec)
+ )
+normalized
+```
+
+```{r}
+normalized %>% extract_workflow(id = "normalized_KNN")
+
+```
+Adicionando NN parameter object
+
+```{r}
+normalized <-
+ normalized %>%
+ option_add(param_info = nnet_param, id = "normalized_neural_network")
+normalized
+```
+
+```{r}
+model_vars <-
+ workflow_variables(outcomes = next_PTS,
+ predictors = everything())
+
+no_pre_proc <-
+ workflow_set(
+ preproc = list(simple = model_vars),
+ models = list(MARS = mars_spec,
+ CART = cart_spec,
+ CART_bagged = bag_cart_spec,
+ RF = rf_spec,
+ boosting = xgb_spec,
+ Cubist = cubist_spec)
+ )
+no_pre_proc
+```
+Finally, we assemble the set that uses nonlinear terms and interactions with the
+appropriate models:
+```{r}
+with_features <-
+ workflow_set(
+ preproc = list(full_quad = poly_recipe),
+ models = list(linear_reg = linear_reg_spec, KNN = knn_spec)
+ )
+```
+These objects are tibbles with the extra class of workflow_set. Row binding does not
+affect the state of the sets, and the result is itself a workflow set:
+
+```{r}
+all_workflows <-
+ bind_rows(no_pre_proc, normalized, with_features) %>%
+ # Make the workflow IDs a little more simple:
+ mutate(wflow_id = gsub("(simple_)|(normalized_)", "", wflow_id))
+all_workflows
+```
+
+Criando grid control e grid results
+```{r}
+
+
+grid_ctrl <-
+ control_grid(
+ save_pred = TRUE,
+ parallel_over = "everything",
+ save_workflow = TRUE
+ )
+grid_ctrl
+
+```
+
+```{r}
+
+grid_results <-
+ all_workflows %>%
+ workflow_map(
+ seed = 1503,
+ resamples = player_folds,
+ grid = 25,
+ control = grid_ctrl, 
+ verbose = TRUE
+ )
+
+
+#Parou de funcionar aqui, as coisas daqui pra baixo foi que coletei do livro e já deixei pronto assim que consertar essa parte de cima.
+
+#Error Msg:
+#→ A | error:   Some columns are non-numeric. The data cannot be converted to numeric matrix: 'opp', 'next_opp'.
+#There were issues with some computations   A: x1250
+#Warning: All models failed. Run `show_notes(.Last.tune.result)` for more information.→ A | warning: NAs introduced by coercion
+#There were issues with some computations   A: x938
+#Timing stopped at: 1475 19.78 1757
+
+```
+
+
+
+```{r}
+
+map<-workflow_map(all_workflows)
+print(map$result)
+```
+
+
+Dando erro aqui em cima
+---------------------------------------------------------------------------
+The results show that the option and result columns have been updated:
+
+```{r}
+
+grid_ctrl <-
+ control_grid(
+ save_pred = TRUE,
+  parallel_over = "sequential",
+ save_workflow = TRUE
+ )
+
+full_results_time <-
+ system.time(
+ grid_results <-
+ all_workflows %>%
+ workflow_map(seed = 1503, resamples = player_folds, grid = 25,
+ control = grid_ctrl, verbose = TRUE)
+ )
+
+
+```
+
+```{r}
+num_grid_models <- nrow(collect_metrics(grid_results, summarize = FALSE))
+
+```
+
+```{r}
+grid_results
+```
+
+Avaliando resultado doss modelos:
+```{r}
+grid_results %>%
+ rank_results() %>%
+ filter(.metric == "rmse") %>%
+ select(model, .config, rmse = mean, rank)
+```
+
+rmsw x Workflow Rank
+
+```{r}
+autoplot(
+ grid_results,
+ rank_metric = "rmse", # <- how to order models
+ metric = "rmse", # <- which metric to visualize
+ select_best = TRUE # <- one point per workflow
+) +
+ geom_text(aes(y = mean - 1/2, label = wflow_id), angle = 90, hjust = 1) +
+ lims(y = c(3.5, 9.5)) +
+ theme(legend.position = "none")
+```
+
+autoplot() for Cubist:
+```{r}
+autoplot(grid_results, id = "Cubist", metric = "rmse")
+
+```
+
