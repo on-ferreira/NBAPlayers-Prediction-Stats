@@ -1,0 +1,533 @@
+---
+title: "Single Player Modeling"
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(BasketballAnalyzeR) 
+library(gridExtra)
+library(tidymodels)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(modelr)
+library(gapminder)
+library(recipes)
+library(conflicted)
+library(ranger)
+```
+
+
+```{r reading csv}
+
+df <- read_csv("data/cleanedData.csv")  
+
+df
+```
+
+
+Usarei a função nest() para agrupar o df por jogador
+```{r nest}
+
+# Assuming your dataframe is named df
+nested_df <- df %>% 
+  group_by(Name) %>% 
+  nest(.key="data")
+
+
+
+# Print the nested data
+nested_df
+
+```
+Criando colunas extras no nest para total de jogos e minutos jogados para cada jogador
+```{r}
+# Define a function to calculate the sum of MP
+sum_MP <- function(data) {
+  sum(data$MP)
+}
+
+# Define a function to count the occurrences of the player
+count <- function(data) {
+  nrow(data)
+}
+
+nested_df <- nested_df %>%
+  mutate(sum_MP = map_dbl(data, sum_MP),
+         count = map_int(data, count))
+
+
+# Print the nested data with sum_MP and count columns
+nested_df
+
+```
+
+
+Testando como está o nested para os jogadores
+```{r testing player}
+# Filter the nested data for "joel_embiid"
+player_data <- nested_df[nested_df$Name == "joel_embiid", ]$data
+
+# Print the nested data for "joel_embiid"
+print(player_data)
+
+```
+Criando Feature Engineering columns
+```{r feature engineering}
+
+# Function to calculate rest days
+calculate_rest_days <- function(data) {
+  data$rest_days <- c(0, diff(data$date))
+  return(data)
+}
+
+# Apply the calculate_rest_days function to nested_df
+nested_df <- nested_df %>%
+  mutate(data = purrr::map(data, ~ calculate_rest_days(.)))
+
+#Creating the columns next_opp and next_PTS 
+nested_df <- nested_df %>%
+  mutate(data = map(data, ~ {
+    df <- .x
+    df$next_opp <- c(df$opp[-1], NA)
+    df$next_PTS <- c(df$PTS[-1], NA)
+    df
+  }))
+
+
+# View the updated nested_df with the rest_days column within each nested dataset
+nested_df
+```
+Conferindo se as mudanças deram certo
+```{r choosing player to be modeled}
+player_name <- "nikola_jokic"
+
+# Filter the nested data for "nikola_jokic"
+player_df <- nested_df %>% 
+  filter(Name == player_name) %>%
+  pull(data) %>%
+  pluck(1)
+
+#Removing the last game row that will contain NA in next_PTS
+player_df <- player_df %>% slice(-n())
+
+
+# Print the nested data for "nikola_jokic"
+print(player_df)
+
+
+```
+
+Nessa versão do código vou tratar individualmente um jogador que será escolhido no chunck acima ao invés de criar funções que tratam de forma geral no nested. [Possivel ideia é criar uma função que faça toda a modelagem de uma vez e salve somente o fit como retorno final, ou criar uma função que agrupe todo o processo que faremos aqui de uma vez]
+
+
+```{r}
+# Count unique values for each variable
+unique_counts <- sapply(player_df, function(x) length(unique(x)))
+
+# Identify columns with only one unique value
+columns_to_drop <- names(unique_counts[unique_counts == 1])
+
+
+set.seed(502)
+player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+player_df_train <- training(player_df_split)
+player_df_test <- testing(player_df_split)
+
+
+simple_recipe <-
+  recipe(next_PTS ~ ., data = player_df_train) %>%
+  step_rm(all_of(columns_to_drop)) %>%
+  step_rm(location)%>%
+    step_dummy(all_nominal_predictors())
+simple_recipe
+
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_wflow <-
+ workflow() %>%
+ add_model(lm_model) %>%
+ add_recipe(simple_recipe)
+lm_wflow
+
+lm_fit <- fit(lm_wflow, player_df_train)
+
+
+```
+
+```{r}
+lm_fit %>%
+ extract_recipe(estimated = TRUE)
+```
+
+```{r}
+lm_fit %>%
+ # This returns the parsnip object:
+ extract_fit_parsnip() %>%
+ # Now tidy the linear model object:
+ tidy() %>%
+ slice(1:100)
+```
+
+```{r}
+pdf_test_res <- predict(lm_fit, player_df_test)
+pdf_test_res
+```
+
+
+```{r}
+pdf_test_res <- bind_cols(pdf_test_res, player_df_test %>% select(next_PTS))
+pdf_test_res
+
+```
+
+```{r}
+ggplot(pdf_test_res, aes(x = next_PTS, y = .pred)) +
+ # Create a diagonal line:
+ geom_abline(lty = 2) +
+ geom_point(alpha = 0.5) +
+ labs(y = "Predicted next_PTS", x = "Actual next_PTS") +
+ # Scale and size the x- and y-axis uniformly:
+ coord_obs_pred()
+
+
+```
+Noto que existem alguns jogos onde o valor atual foi 0, acho que vale a pena investigar isso mais a fundo e tentar encontrar o motivo para definir se compensa ou não deixar a linha no df
+```{r}
+#player_df_test[player_df_test$next_PTS == 0, ] #Results in 3 different games
+#player_df_test[player_df_test$PTS == 0, ]      #Results in one single game with a huge FOUL problem
+
+#I'll perform this on the full player_df game to further investigation
+
+player_df[player_df$PTS == 0,]
+
+#The rows will be maintenance a prior, since they games with 0 PTS were due FOUL problems and one was due a short MP played, probably some lesion in the beginning of the game, this may be removed in future.
+
+
+
+```
+
+
+
+```{r}
+conflict_prefer("rmse", winner = "yardstick")
+conflict_prefer("rsq", winner = "yardstick")
+conflict_prefer("mae", winner = "yardstick")
+
+#tidymodels_prefer(quiet = FALSE)
+#• modelr::rmse
+#• yardstick::rmse
+player_metrics <- metric_set(rmse, rsq, mae)
+player_metrics(pdf_test_res, truth = next_PTS, estimate = .pred)
+
+```
+
+
+```{r}
+rf_model <-
+ rand_forest(trees = 1000) %>%
+ set_engine("ranger") %>%
+ set_mode("regression")
+
+rf_wflow <-
+ workflow() %>%
+  add_recipe(simple_recipe) %>%
+ add_model(rf_model)
+
+rf_fit <- rf_wflow %>% fit(data = player_df_train)
+
+
+```
+
+
+```{r}
+estimate_perf <- function(model, dat) {
+ # Capture the names of the `model` and `dat` objects
+ cl <- match.call()
+ obj_name <- as.character(cl$model)
+ data_name <- as.character(cl$dat)
+ data_name <- gsub("player_df_", "", data_name)
+ # Estimate these metrics:
+ reg_metrics <- metric_set(rmse, rsq)
+ model %>%
+ predict(dat) %>%
+ bind_cols(dat %>% select(next_PTS)) %>%
+ reg_metrics(next_PTS, .pred) %>%
+ select(-.estimator) %>%
+ mutate(object = obj_name, data = data_name)
+}
+
+# Estimate performance for rf_fit on player_df_train
+rf_train_perf <- estimate_perf(rf_fit, player_df_train)
+
+# Estimate performance for lm_fit on player_df_train
+lm_train_perf <- estimate_perf(lm_fit, player_df_train)
+
+# Estimate performance for lm_fit on player_df_test
+lm_test_perf <- estimate_perf(lm_fit, player_df_test)
+
+# Estimate performance for rf_fit on player_df_test
+rf_test_perf <- estimate_perf(rf_fit, player_df_test)
+
+# Combine the results into a single table
+combined_results <- bind_rows(rf_train_perf, lm_train_perf, lm_test_perf, rf_test_perf)
+combined_results
+
+```
+
+
+```{r}
+set.seed(1001)
+
+
+player_folds <- vfold_cv(player_df_train, v = 10)
+player_folds
+
+# For the first fold:
+player_folds$splits[[1]] %>% analysis() %>% dim()
+#411 45
+
+
+player_mccv <- mc_cv(player_df_train, prop = 9/10, times = 20)
+
+
+```
+
+```{r}
+
+set.seed(1002)
+val_set <- validation_split(player_df_train, prop = 3/4)
+val_set
+
+bt <- bootstraps(player_df_train, times = 5)
+bt
+
+
+```
+
+```{r}
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+set.seed(1003)
+rf_res <-
+ rf_wflow %>%
+ fit_resamples(resamples = player_folds, control = keep_pred)
+rf_res
+
+```
+
+```{r}
+collect_metrics(rf_res)
+
+```
+
+
+```{r}
+assess_res <- collect_predictions(rf_res)
+assess_res
+```
+
+```{r}
+assess_res %>%
+ ggplot(aes(x = next_PTS, y = .pred)) +
+ geom_point(alpha = .15) +
+ geom_abline(color = "red") +
+ coord_obs_pred() +
+ ylab("Predicted")
+```
+
+```{r}
+over_predicted <-
+ assess_res %>%
+ mutate(residual = next_PTS - .pred) %>%
+ arrange(desc(abs(residual))) %>%
+ slice(1:10)
+over_predicted
+```
+
+
+```{r}
+player_df_train %>%
+ slice(over_predicted$.row) %>%
+ select(everything())
+```
+
+
+```{r}
+val_res <- rf_wflow %>% fit_resamples(resamples = val_set)
+val_res
+```
+
+```{r}
+collect_metrics(val_res)
+
+```
+
+RMSE levemente menor e RSQ um pouquinho maior
+
+P.S.: Retornar no Cap. 11 do tidymodels depois de criar outros tipos de modelos no futuro
+
+```{r}
+
+preproc <- list(simple = simple_recipe)
+lm_models <- workflow_set(preproc, list(lm = linear_reg()), cross = FALSE)
+
+lm_models <-
+ lm_models %>%
+ workflow_map("fit_resamples",
+ # Options to `workflow_map()`:
+ seed = 1101, verbose = TRUE,
+ # Options to `fit_resamples()`:
+ resamples = player_folds, control = keep_pred)
+lm_models
+
+two_models <-
+ as_workflow_set(random_forest = rf_res) %>%
+ bind_rows(lm_models)
+two_models
+
+
+```
+
+```{r ranking workflow}
+
+library(ggrepel)
+autoplot(two_models, metric = "rsq") +
+ geom_text_repel(aes(label = wflow_id), nudge_x = 1/8, nudge_y = 1/100) +
+ theme(legend.position = "none")
+
+```
+
+```{r}
+library(corrr)
+
+rsq_indiv_estimates <-
+ collect_metrics(two_models, summarize = FALSE) %>%
+ filter(.metric == "rsq")
+
+rsq_wider <-
+ rsq_indiv_estimates %>%
+ select(wflow_id, .estimate, id) %>%
+ pivot_wider(id_cols = "id", names_from = "wflow_id", values_from = ".estimate")
+
+corrr::correlate(rsq_wider %>% select(-id), quiet = TRUE)
+
+
+```
+ 
+```{r}
+rsq_indiv_estimates %>%
+ mutate(wflow_id = reorder(wflow_id, .estimate)) %>%
+ ggplot(aes(x = wflow_id, y = .estimate, group = id, color = id, lty = id)) +
+ geom_line(alpha = .8, lwd = 1.25) +
+ theme(legend.position = "none")
+```
+
+
+```{r}
+rsq_wider %>%
+ with( cor.test(random_forest, simple_lm) ) %>%
+ tidy() %>%
+ select(estimate, starts_with("conf"))
+```
+
+
+
+
+```{r}
+library(tidyposterior)
+library(rstanarm)
+
+# The rstanarm package creates copious amounts of output; those results
+# are not shown here but are worth inspecting for potential issues. The
+# option `refresh = 0` can be used to eliminate the logging.
+rsq_anova <-
+ perf_mod(
+ two_models,
+ metric = "rsq",
+ prior_intercept = rstanarm::student_t(df = 1),
+ chains = 4,
+ iter = 5000,
+ seed = 1102
+ )
+```
+
+```{r}
+model_post <-
+ rsq_anova %>%
+ # Take a random sample from the posterior distribution
+ # so set the seed again to be reproducible.
+ tidy(seed = 1103)
+glimpse(model_post)
+```
+
+```{r}
+model_post %>%
+ mutate(model = forcats::fct_inorder(model)) %>%
+ ggplot(aes(x = posterior)) +
+ geom_histogram(bins = 50, color = "white", fill = "blue", alpha = 0.4) +
+ facet_wrap(~ model, ncol = 1)
+#Posterior for mean R²
+
+```
+
+```{r}
+autoplot(rsq_anova) +
+ geom_text_repel(aes(label = workflow), nudge_x = 1/8, nudge_y = 1/100) +
+ theme(legend.position = "none")
+```
+```{r}
+player_df_train
+```
+
+
+```{r xgboost}
+library(usemodels)
+library(xgboost)
+
+use_xgboost(next_PTS ~ .,
+ data = player_df_train,
+ # Add comments explaining some of the code:
+ verbose = TRUE)
+
+xgboost_recipe <-
+ recipe(formula = next_PTS ~ ., data = player_df_train) %>%
+ step_novel(all_nominal_predictors()) %>%
+ ## This model requires the predictors to be numeric. The most common
+ ## method to convert qualitative predictors to numeric is to create
+ ## binary indicator variables (aka dummy variables) from these
+ ## predictors. However, for this model, binary indicator variables can be
+ ## made for each of the levels of the factors (known as 'one-hot
+ ## encoding').
+  step_rm(all_of(columns_to_drop)) %>%
+    step_rm(date)%>%
+ step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+ step_zv(all_predictors())
+
+xgboost_spec <-
+ boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(),
+ loss_reduction = tune(), sample_size = tune()) %>%
+ set_mode("regression") %>%
+ set_engine("xgboost")
+
+xgboost_workflow <-
+ workflow() %>%
+ add_recipe(xgboost_recipe) %>%
+ add_model(xgboost_spec)
+
+set.seed(69305)
+
+xgboost_tune <-
+ tune_grid(xgboost_workflow,
+           resamples = player_folds,
+           grid = 25,
+           verbose = TRUE)
+
+
+```
+ 
+

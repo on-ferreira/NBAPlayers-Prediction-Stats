@@ -1,0 +1,458 @@
+---
+title: "Analises"
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(BasketballAnalyzeR) 
+library(gridExtra)
+library(tidymodels)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(modelr)
+library(gapminder)
+library(recipes)
+
+```
+
+
+```{r reading csv}
+
+df <- read_csv("data/cleanedData.csv")  
+df
+```
+
+
+Univariate Analysis
+```{r UA}
+# Histogram of MP variable
+ggplot(df, aes(x = MP)) +
+  geom_histogram(binwidth = 5) +
+  xlab("MP") +
+  ylab("Frequency") +
+  ggtitle("Distribution of Minutes Played")
+
+# Histogram of PTS variable
+ggplot(df, aes(x = PTS)) +
+  geom_histogram(binwidth = 5) +
+  xlab("Points") +
+  ylab("Frequency") +
+  ggtitle("Distribution of Points")
+
+# Bar chart of a categorical variable
+ggplot(df, aes(x = team)) +
+  geom_bar() +
+  xlab("Team") +
+  ylab("Count") +
+  ggtitle("Number of Games Played by Team")
+```
+Bivariate Analysis
+```{r BA}
+
+# Scatter plot of MP x PTS
+ggplot(df, aes(x = MP, y = PTS)) +
+  geom_point() +
+  xlab("MP") +
+  ylab("Points") +
+  ggtitle("MP vs. Points")
+
+# Correlation matrix of most important variables
+correlation_matrix <- cor(df[c("MP","PTS", "AST", "TRB","STL","BLK","TOV","PF","FG","FGA","3P","3PA","FT","FTA")])
+corrplot(correlation_matrix, method = "circle")
+
+# Correlation matrix with the advanced stats column
+correlation_matrix <- cor(df[c("PTS","AST", "TRB", "TS%","eFG%","3PAr","FTr","ORB%","DRB%","TRB%","AST%","STL%","BLK%", "TOV%","USG%","ORtg","DRtg","BPM")])
+corrplot(correlation_matrix, method = "circle")
+
+numerical_df <- df %>% 
+  mutate(team = as.numeric(as.factor(team)),
+         opp = as.numeric(as.factor(opp)))
+
+# Correlation matrix with teams and seasonal data
+correlation_matrix <- cor(numerical_df[c("PTS","AST", "TRB", "opp","team","season")])
+corrplot(correlation_matrix, method = "circle")
+
+#correlation among everything
+
+
+correlation_matrix <- cor(numerical_df[c("MP","PTS", "AST", "TRB","STL","BLK","TOV","PF","FG","FGA","3P","3PA","FT","FTA", "TS%","eFG%","3PAr","FTr","ORB%","DRB%","TRB%","AST%","STL%","BLK%", "TOV%","USG%","ORtg","DRtg","BPM","opp","team","season")])
+corrplot(correlation_matrix, method = "circle")
+
+
+
+
+```
+Multivariate Analysis
+
+
+```{r}
+# Box plot of points by team
+ggplot(df, aes(x = team, y = PTS)) +
+  geom_boxplot() +
+  xlab("Team") +
+  ylab("Points") +
+  ggtitle("Points by Team") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Line plot of points over time
+df_season <- df %>% group_by(season) %>% summarize(avg_points = mean(PTS))
+ggplot(df_season, aes(x = season, y = avg_points)) +
+  geom_line() +
+  xlab("Season") +
+  ylab("Average Points") +
+  ggtitle("Average Points per Season") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Usarei a função nest() para agrupar o df por jogador
+```{r nest}
+
+# Assuming your dataframe is named df
+nested_data <- df %>% 
+  group_by(Name) %>% 
+  nest(.key="data")
+
+
+
+# Print the nested data
+nested_data
+
+```
+Criando colunas extras no nest para total de jogos e minutos jogados para cada jogador
+```{r}
+# Define a function to calculate the sum of MP
+sum_MP <- function(data) {
+  sum(data$MP)
+}
+
+# Define a function to count the occurrences of the player
+count <- function(data) {
+  nrow(data)
+}
+
+nested_data <- nested_data %>%
+  mutate(sum_MP = map_dbl(data, sum_MP),
+         count = map_int(data, count))
+
+
+# Print the nested data with sum_MP and count columns
+nested_data
+
+```
+
+
+Testando como está o nested para os jogadores
+```{r testing player}
+# Filter the nested data for "joel_embiid"
+player_data <- nested_data[nested_data$Name == "joel_embiid", ]$data
+
+# Print the nested data for "joel_embiid"
+print(player_data)
+
+```
+Criando Feature Engineering columns
+```{r feature engineering}
+
+# Function to calculate rest days
+calculate_rest_days <- function(df) {
+  df$rest_days <- c(0, diff(df$date))
+  return(df)
+}
+
+# Apply the calculate_rest_days function to nested_data
+nested_data <- nested_data %>%
+  mutate(data = purrr::map(data, ~ calculate_rest_days(.)))
+
+#Creating the columns next_opp and next_PTS 
+nested_data <- nested_data %>%
+  mutate(data = map(data, ~ {
+    df <- .x
+    df$next_opp <- c(df$opp[-1], NA)
+    df$next_PTS <- c(df$PTS[-1], NA)
+    df
+  }))
+
+
+# View the updated nested_data with the rest_days column within each nested dataset
+nested_data
+```
+Conferindo se as mudanças deram certo
+```{r}
+player_name <- "joel_embiid"
+
+# Filter the nested data for "joel_embiid"
+joel_embiid_data <- nested_data %>% 
+  filter(Name == player_name) %>%
+  pull(data) %>%
+  pluck(1)
+
+# Print the nested data for "joel_embiid"
+print(joel_embiid_data)
+```
+
+Opto por seguir o passo-a-passo do Tidy Modeling em primeiro momento utilizando todas as variavéis do $data dos jogadores.
+```{r}
+
+clone_nested <- nested_data %>%
+    filter(count > 20)
+
+
+lm_model <- function(data) {
+  # First, remove factors with only one level from the predictors [Ex: When the player played in only 1 team]
+  predictors <- select(data, where(~ is.factor(.) && n_distinct(.) > 1))
+  
+  #First we delete the last row of the data that will contain next_PTS = NAN
+  data <- data %>% slice(-n())
+  
+  # Ensure that the `strata` column is present and has compatible sizes
+  if (!"season_month" %in% colnames(data) || !is.numeric(data$season_month)) {
+    return(NULL)
+  }
+  
+  # Fit the linear regression model
+  set.seed(502)
+  data_split <- initial_split(data, prop = 0.80, strata = season_month)
+  
+  data_train <- training(data_split)
+  data_test <- testing(data_split)
+  
+  lm_model <- linear_reg() %>% set_engine("lm")
+  
+  lm_wflow <-
+    workflow() %>%
+    add_model(lm_model) %>%
+    add_variables(outcome = next_PTS, predictors = names(predictors))
+  
+  lm_fit <- fit(lm_wflow, data_train)
+  lm_fit
+}
+
+
+clone_nested <- clone_nested %>%
+  mutate(model = map(data,lm_model))
+
+clone_nested
+
+
+
+
+```
+O lm_model acima será avaliado no futuro
+
+Vou fazer a initial_split aqui e deixar os dados já divididos para facilitar as operações no futuro
+```{r splitting into train and test data}
+
+split_data <- function(data) {
+  set.seed(502)
+  data_split <- initial_split(data, prop = 0.80, strata = season_month)
+  data_train <- training(data_split)
+  data_test <- testing(data_split)
+  list(data_train = data_train, data_test = data_test)
+}
+
+clone_nested <- clone_nested %>%
+  mutate(splitado = map(data,split_data))
+clone_nested
+
+```
+
+```{r extracting data_train and data_test}
+
+
+clone_nested <- clone_nested %>%
+  mutate(data_train = map(splitado, pluck, "data_train"),
+         data_test = map(splitado, pluck, "data_test"))
+clone_nested
+
+
+```
+```{r removing the splitado column}
+clone_nested <- clone_nested %>%
+  select(-splitado)
+clone_nested
+```
+
+
+
+
+```{r}
+
+simple_lm <- function(data,data_train){
+
+ recipe_obj <- recipe(next_PTS ~ ., data = data_train) %>%
+    step_select(where(~ is.factor(.) && n_distinct(.) > 1)) %>%
+    step_slice(-n()) %>%
+    step_dummy(all_nominal_predictors(), -all_outcomes())
+  recipe_obj
+  
+}
+
+clone_nested <- clone_nested %>%
+  mutate(simple = map2(data,data_train, simple_lm))
+clone_nested
+
+
+```
+
+
+```{r}
+
+recipe_model <- function(recipe) {
+  lm_model <- linear_reg() %>% set_engine("lm")
+  
+  lm_wflow <- 
+    workflow() %>%
+    add_model(lm_model) %>%
+    add_recipe(recipe)
+  lm_wflow
+}
+
+clone_nested <- clone_nested %>%
+  mutate(recipe_wflow = map(simple, ~recipe_model(.x)))
+clone_nested
+
+
+```
+Removida a parte onde rodava um modelo linear reg aqui, decido deixar isso para arquivos futuros. 
+
+
+```{r}
+
+test <- clone_nested %>% 
+  filter(Name == "joel_embiid") %>%
+  pull(simple)
+
+test
+
+```
+
+
+
+
+Testando a lenda urbana de que o Jokic pontua mais em jogos no horário da tarde. O desempenho do atual MVP também será posto nesse primeiro gráfico para uma comparação visual. Tentando ver provas visuais de que o horário do jogo pode ser significante para alguns jogadores
+
+```{r}
+# Define the player names
+player_names <- c("joel_embiid", "nikola_jokic")
+
+# Filter the nested data for specific players
+filtered_data <- nested_data %>%
+  filter(Name %in% player_names) %>%
+  mutate(data = map(data, ~ .x %>% unnest(cols = c(PTS, hour_float))))
+
+# Combine the filtered and unnested data into a single dataframe
+combined_data <- bind_rows(filtered_data$data, .id = "Name") %>%
+  mutate(Name = recode(Name, "1" = "nikola_jokic", "2" = "joel_embiid")) %>%
+  group_by(Name, hour_float, PTS) %>%
+  mutate(count = n())
+
+# Print the combined data
+print(combined_data)
+
+# Plot the graph
+ggplot(combined_data, aes(x = hour_float, y = PTS, color = Name, size = count)) +
+  geom_point() +
+  labs(x = "Hour", y = "PTS", color = "Player", size = "Frequência") +
+  scale_color_manual(values = c("joel_embiid" = "red", "nikola_jokic" = "blue"))
+
+
+
+```
+
+```{r correlating hour of the game and pts}
+
+
+
+# Define a function to perform the statistical analysis for each nested group
+hour_model <- function(data) {
+  # Fit the linear regression model
+  lm(PTS ~ hour_float, data = data)
+}
+
+models <- map(nested_data$data, hour_model)
+
+#Cloning the nested_data for this battery of tests
+clone_nested2 <- nested_data %>%
+  mutate(hourmodel = map(data,hour_model))
+clone_nested2
+
+
+```
+```{r adding residuals to the nest}
+
+clone_nested2 <- clone_nested2 %>%
+  mutate(
+    resids = map2(data,hourmodel,add_residuals)
+  )
+clone_nested2
+```
+```{r unnesting}
+resids <- unnest(clone_nested2, resids)
+resids
+
+```
+```{r plotting}
+
+
+resids %>%
+ ggplot(aes(hour_float, resid)) +
+ geom_line(aes(group = Name), alpha = 1 / 3) +
+ geom_smooth(se = FALSE)
+#> `geom_smooth()` using method = 'gam'
+
+
+```
+```{r faceting by team}
+resids %>%
+ ggplot(aes(hour_float, resid, group = Name)) +
+ geom_line(alpha = 1 / 3) +
+ facet_wrap(~team)
+
+```
+```{r glance}
+
+glance <- clone_nested2 %>%
+  mutate(glance = map(hourmodel,broom::glance)) %>%
+  unnest(glance, .drop = TRUE)
+glance
+
+
+```
+
+```{r}
+glance %>%
+ arrange(r.squared)
+
+```
+```{r}
+
+good_fit <- filter(glance, abs(r.squared) > 0.75 )
+
+good_fit
+
+unnested_good_fit <- good_fit %>%
+  unnest(cols = c(data))
+
+unnested_good_fit
+
+name_counts <- unnested_good_fit %>%
+  group_by(Name, count) %>%
+  summarise() %>%
+  ungroup() %>%
+  arrange(desc(count))
+
+
+name_counts
+
+
+```
+
+Baseado no gráfico, que não mostrou nenhum padrão de rendimento baseado no horário e que as pessoas com melhores rendimentos em horários especifico são pessoas com poucos jogos, decidi não realizar testes ANOVA nem me aprofundar nesse caminho.
+

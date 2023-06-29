@@ -1,0 +1,286 @@
+---
+title: "Modeling"
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(gridExtra)
+library(tidymodels)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(modelr)
+library(gapminder)
+library(recipes)
+```
+
+
+```{r reading csv}
+
+df <- read_csv("data/cleanedData.csv")  
+
+df
+```
+
+
+Overview of the data
+```{r overview}
+# Summary of the DataFrame
+summary_df <- summary(df)
+print(summary_df)
+```
+
+Usarei a função nest() para agrupar o df por jogador
+```{r nest}
+
+# Assuming your dataframe is named df
+nested_df <- df %>% 
+  group_by(Name) %>% 
+  nest(.key="data")
+
+# Print the nested data
+nested_df
+
+```
+
+Criando colunas extras no nest para total de jogos e minutos jogados para cada jogador
+```{r}
+# Define a function to calculate the sum of MP
+sum_MP <- function(data) {
+  sum(data$MP)
+}
+
+# Define a function to count the occurrences of the player
+count <- function(data) {
+  nrow(data)
+}
+
+nested_df <- nested_df %>%
+  mutate(sum_MP = map_dbl(data, sum_MP),
+         count = map_int(data, count))
+
+
+# Print the nested data with sum_MP and count columns
+nested_df
+
+```
+
+
+Testando como está o nested para os jogadores
+```{r testing player}
+# Filter the nested data for "joel_embiid"
+player_data <- nested_df[nested_df$Name == "joel_embiid", ]$data
+
+# Print the nested data for "joel_embiid"
+print(player_data)
+
+```
+Criando Feature Engineering columns
+```{r feature engineering}
+
+# Function to calculate rest days
+calculate_rest_days <- function(data) {
+  data$rest_days <- c(0, diff(data$date))
+  return(data)
+}
+
+# Apply the calculate_rest_days function to nested_df
+nested_df <- nested_df %>%
+  mutate(data = purrr::map(data, ~ calculate_rest_days(.)))
+
+#Creating the columns next_opp and next_PTS 
+nested_df <- nested_df %>%
+  mutate(data = map(data, ~ {
+    df <- .x
+    df$next_opp <- c(df$opp[-1], NA)
+    df$next_PTS <- c(df$PTS[-1], NA)
+    df
+  }))
+
+
+# View the updated nested_df with the rest_days column within each nested dataset
+nested_df
+```
+Conferindo se as mudanças deram certo
+```{r}
+player_name <- "joel_embiid"
+
+# Filter the nested data for "joel_embiid"
+joel_embiid_data <- nested_df %>% 
+  filter(Name == player_name) %>%
+  pull(data) %>%
+  pluck(1)
+
+# Print the nested data for "joel_embiid"
+print(joel_embiid_data)
+```
+
+Opto por seguir o passo-a-passo do Tidy Modeling em primeiro momento utilizando todas as variavéis do $data dos jogadores.
+```{r}
+
+clone_nested <- nested_df %>%
+    filter(count > 20)
+
+
+lm_model <- function(data) {
+  # First, remove factors with only one level from the predictors [Ex: When the player played in only 1 team]
+  predictors <- select(data, where(~ is.factor(.) && n_distinct(.) > 1))
+  
+  #First we delete the last row of the data that will contain next_PTS = NAN
+  data <- data %>% slice(-n())
+  
+  # Ensure that the `strata` column is present and has compatible sizes
+  if (!"season_month" %in% colnames(data) || !is.numeric(data$season_month)) {
+    return(NULL)
+  }
+  
+  # Fit the linear regression model
+  set.seed(502)
+  data_split <- initial_split(data, prop = 0.80, strata = season_month)
+  
+  data_train <- training(data_split)
+  data_test <- testing(data_split)
+  
+  lm_model <- linear_reg() %>% set_engine("lm")
+  
+  lm_wflow <-
+    workflow() %>%
+    add_model(lm_model) %>%
+    add_variables(outcome = next_PTS, predictors = names(predictors))
+  
+  lm_fit <- fit(lm_wflow, data_train)
+  lm_fit
+}
+
+
+clone_nested <- clone_nested %>%
+  mutate(model = map(data,lm_model))
+
+clone_nested
+
+
+```
+O lm_model acima será avaliado no futuro
+
+Vou fazer a initial_split aqui e deixar os dados já divididos para facilitar as operações no futuro
+```{r splitting into train and test data}
+
+split_data <- function(data) {
+  #First we delete the last row of the data that will contain next_PTS = NAN
+  data <- data %>% slice(-n())
+  
+  set.seed(502)
+  data_split <- initial_split(data, prop = 0.80, strata = season_month)
+  data_train <- training(data_split)
+  data_test <- testing(data_split)
+  list(data_train = data_train, data_test = data_test)
+}
+
+clone_nested <- clone_nested %>%
+  mutate(splitado = map(data,split_data))
+clone_nested
+
+```
+
+```{r extracting data_train and data_test}
+
+
+clone_nested <- clone_nested %>%
+  mutate(data_train = map(splitado, pluck, "data_train"),
+         data_test = map(splitado, pluck, "data_test"))
+clone_nested
+
+
+```
+```{r removing the splitado column}
+clone_nested <- clone_nested %>%
+  select(-splitado)
+clone_nested
+```
+
+
+
+
+```{r}
+
+simple_lm <- function(data,data_train){
+
+  recipe(next_PTS ~ ., data = data_train) %>%
+    step_select(where(~ is.factor(.) && n_distinct(.) > 1)) %>%
+    step_dummy(all_nominal_predictors(), -all_outcomes())
+}
+
+clone_nested <- clone_nested %>%
+  mutate(simple = mapply(simple_lm, data, data_train, SIMPLIFY = FALSE))
+clone_nested
+
+
+```
+
+
+```{r}
+
+recipe_model <- function(recipe) {
+  lm_model <- linear_reg() %>% set_engine("lm")
+  
+  lm_wflow <- 
+    workflow() %>%
+    add_model(lm_model) %>%
+    add_recipe(recipe)
+  lm_wflow
+}
+
+clone_nested <- clone_nested %>%
+  mutate(recipe_wflow = map(simple, ~recipe_model(.x)))
+clone_nested
+
+
+```
+
+
+```{r}
+#Let’s estimate both the recipe and model using a simple call to fit():
+recipe_fit <- function(wflow, data_train) {
+  set.seed(502)
+  data_train_df <- as.data.frame(data_train)  # Convert data_train to a data frame
+  print(data_train_df)
+
+  lm_fit <- fit(wflow, data = data_train_df)
+
+  lm_fit
+}
+
+clone_nested <- clone_nested %>%
+  mutate(rec_fit = mapply(recipe_fit, recipe_wflow, data_train, SIMPLIFY = FALSE))
+
+clone_nested
+
+
+```
+
+Edit: Nesse ponto me veio a ideia de ter o data_train e o data_test como duas colunas externas ao nest() para não ficar chamando o data_split repetidas vezes. Voltei no código e fiz isso, vou remover em algum update futuro.
+```{r}
+clone_nested %>%
+  filter(Name == "a.j._hammons") %>%
+  pull(data_train)
+```
+
+
+
+```{r}
+
+test <- clone_nested %>% 
+  filter(Name == "joel_embiid") %>%
+  pull(simple)
+
+test
+
+```
+
+
+Essa ideia foi deixada em stand by até descobrir qual o melhor modelo para esse tipo de dados
