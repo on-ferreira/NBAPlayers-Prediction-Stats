@@ -1,5 +1,5 @@
 ---
-title: "Single Player Modeling"
+title: "02 - SP Modelling with recipes"
 author: "orlando"
 date: "`r Sys.Date()`"
 output: html_document
@@ -107,11 +107,15 @@ Conferindo se as mudanças deram certo
 ```{r choosing player to be modeled}
 player_name <- "nikola_jokic"
 
+conflicts_prefer(dplyr::filter)
+
 # Filter the nested data for "nikola_jokic"
 player_df <- nested_df %>% 
   filter(Name == player_name) %>%
   pull(data) %>%
   pluck(1)
+
+conflicts_prefer(dplyr::slice)
 
 #Removing the last game row that will contain NA in next_PTS
 player_df <- player_df %>% slice(-n())
@@ -490,19 +494,11 @@ library(usemodels)
 library(xgboost)
 
 use_xgboost(next_PTS ~ .,
- data = player_df_train,
- # Add comments explaining some of the code:
- verbose = TRUE)
+ data = player_df_train)
 
 xgboost_recipe <-
  recipe(formula = next_PTS ~ ., data = player_df_train) %>%
  step_novel(all_nominal_predictors()) %>%
- ## This model requires the predictors to be numeric. The most common
- ## method to convert qualitative predictors to numeric is to create
- ## binary indicator variables (aka dummy variables) from these
- ## predictors. However, for this model, binary indicator variables can be
- ## made for each of the levels of the factors (known as 'one-hot
- ## encoding').
   step_rm(all_of(columns_to_drop)) %>%
     step_rm(date)%>%
  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
@@ -524,10 +520,128 @@ set.seed(69305)
 xgboost_tune <-
  tune_grid(xgboost_workflow,
            resamples = player_folds,
-           grid = 25,
-           verbose = TRUE)
+           grid = 25)
 
 
 ```
+ Vendo os melhores parametros encontrados pelo tune_grid()
+```{r}
+show_best(xgboost_tune, metric = "rmse", maximize = FALSE)
+
+
+```
+ Coletando as métricas:
  
+```{r}
+xgboost_metrics <- collect_metrics(xgboost_tune)
+xgboost_metrics
+
+```
+ 
+Plotando em forma de gráfico:
+```{r}
+autoplot(xgboost_tune, metric = "rmse")
+
+```
+```{r}
+
+xgboost_tuned <- xgboost_tune
+
+xgboost_tuned %>%
+  tune::show_best(metric = "rmse")
+xgboost_tuned
+
+xgboost_best_params <- xgboost_tuned %>%
+  tune::select_best("rmse")
+xgboost_best_params
+
+```
+
+Finalizing the model with the best parameters:
+
+```{r}
+
+
+xgboost_model_final <- xgboost_spec %>% 
+  finalize_model(xgboost_best_params)
+
+
+```
+
+Training:
+
+```{r}
+xgboost_recipe <-
+ recipe(formula = next_PTS ~ ., data = player_df_train) %>%
+ step_novel(all_nominal_predictors()) %>%
+  step_rm(all_of(columns_to_drop)) %>%
+    step_rm(date)%>%
+ step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+ step_zv(all_predictors()) %>%
+  prep()
+
+train_processed <- bake(xgboost_recipe,  new_data = player_df_train)
+train_prediction <- xgboost_model_final %>%
+  # fit the model on all the training data
+  fit(
+    formula = next_PTS ~ ., 
+    data    = train_processed
+  ) %>%
+  # predict the sale prices for the training data
+  predict(new_data = train_processed) %>%
+  bind_cols(player_df_train)
+
+xgboost_score_train <- 
+  train_prediction %>%
+  yardstick::metrics(next_PTS, .pred) %>%
+  mutate(.estimate = format(round(.estimate, 2), big.mark = ","))
+
+xgboost_score_train
+
+```
+Agora usando o player_df_test:
+```{r}
+
+test_processed  <- bake(xgboost_recipe, new_data = player_df_test)
+test_prediction <- xgboost_model_final %>%
+  # fit the model on all the training data
+  fit(
+    formula = next_PTS ~ ., 
+    data    = train_processed
+  ) %>%
+  # use the training model fit to predict the test data
+  predict(new_data = test_processed) %>%
+  bind_cols(player_df_test)
+# measure the accuracy of our model using `yardstick`
+xgboost_score <- 
+  test_prediction %>%
+  yardstick::metrics(next_PTS, .pred) %>%
+  mutate(.estimate = format(round(.estimate, 2), big.mark = ","))
+xgboost_score
+```
+The above metrics on the test data are significantly worse than our training data metrics, so we know that there is some overfitting going on in our model. This highlights the importance of using test data, rather than training data, to evaluate model performance.To quickly check that there is not an obvious issue with our model’s predictions, let’s plot the test data residuals. (TYCHOBRA, 2020) [https://www.r-bloggers.com/2020/05/using-xgboost-with-tidymodels/]
+
+
+
+```{r}
+
+prediction_residual <- test_prediction %>%
+  arrange(.pred) %>%
+  mutate(residual_pct = (next_PTS - .pred) / .pred) %>%
+  select(.pred, residual_pct)
+ggplot(prediction_residual, aes(x = .pred, y = residual_pct)) +
+  geom_point() +
+  xlab("Predicted next_PTS") +
+  ylab("Residual (%)") +
+  scale_y_continuous(labels = scales::percent)
+
+
+```
+The above chart does not show any super obvious trends in the residuals. This indicates that, at a very high level, our model is not systematically making inaccurate predictions for houses with certain predicted sale prices. 
+
+
+```{r}
+
+
+```
 

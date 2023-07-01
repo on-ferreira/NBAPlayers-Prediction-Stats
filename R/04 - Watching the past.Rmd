@@ -1,0 +1,119 @@
+---
+title: "04 - Watching the past"
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(zoo)
+
+```
+
+Initially, the cleaned CSV should be read and the unnecessary columns should be removed before proceeding with further analysis.Date will be no longer useful, neither year-month-day columns. We'll keep only season and season_month for time columns.
+Location is not relevant in our models.
+Since plus-minus statistics can have limitations and may not always accurately reflect a player's individual performance since they can be influenced by various factors, including the performance of teammates and opponents. They will also be removed from the model.
+
+Furthermore, the columns related to "Advanced Box Score Stats," which are estimations based on team possessions or plays, will be eliminated. This includes columns such as TS%, eFG%, 3PAr, FTr, ORB%, DRB%, TRB%, AST%, STL%, BLK%, TOV%, USG%, ORtg, DRtg, and BPM.
+
+```{r reading csv}
+
+df <- read_csv("data/cleanedData.csv") 
+
+columns_to_be_removed <- c("+/-", "TS%", "eFG%", "3PAr", "FTr", "ORB%", "DRB%", "TRB%", "AST%", "STL%", "BLK%", "TOV%", "USG%", "ORtg", "DRtg", "BPM", "date", "location", "year", "month", "day")
+
+df <- df[, !(names(df) %in% columns_to_be_removed)]
+
+df$home <- as.logical(df$home)
+
+# Convert "opp" column to factor for grouping
+df$opp <- as.factor(df$opp)
+
+
+
+df
+```
+Function to calculate the rolling median for a given column
+
+This function calculates the rolling median for a specified column in a data frame.
+It creates additional columns for the last n games' median of the player's performance
+and the last n games' median of the player's performance against the specific opponent.
+
+Arguments:
+- data: The data frame containing the player's game data.
+- column: The name of the column for which the rolling median will be calculated.
+- n: The number of games to consider in the rolling window.
+Returns:
+ The data frame with additional columns for the rolling medians.
+
+Example usage:
+ df <- calculate_rolling_median(data, "FG", 10)
+ Calculates the rolling median of Field Goals (FG) for the last 10 games.
+
+
+The resulting data frame will have additional columns with names following the format "LN_stat" for the player's last 10 game medians and "LN_stat_opp" for the player's last N game medians against the specified team.
+
+To use the function, pass the data frame, column, and the desired length of medians.
+
+```{r}
+
+# Create a function to calculate the median
+calculate_median <- function(x) {
+  median(x, na.rm = TRUE)
+}
+
+
+# Function to calculate the rolling median for a given column
+calculate_rolling_median <- function(data, column, n) {
+  data <- data %>% group_by(Name)
+  
+  column_name <- paste0("L", n, "_", column)
+  
+  # Apply the function to calculate the rolling median using a window of size 10
+  data <- data %>%
+    mutate("{column_name}" := rollapply(.data[[column]], width = n, FUN = calculate_median,
+                                  fill = NA, align = "right", partial = TRUE)) %>%
+    ungroup()
+  
+  # Group the data by player name and opponent
+  data <- data %>% group_by(Name, opp)
+  
+  column_name_opp <- paste0("L", n, "_", column,"_opp")
+
+  # Apply the function to calculate the median using rolling window of size 10 per opponent
+  data <- data %>%
+    mutate("{column_name_opp}" := rollapply(.data[[column]], width = n, FUN = calculate_median, fill = NA, align = "right",partial=TRUE))%>%
+    ungroup()
+  
+  return(data)
+}
+
+
+```
+Applying the function on the desired columns and n=10
+
+```{r} 
+columns_to_watch <- c("FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF", "PTS")
+
+for (column in columns_to_watch) {
+  df <- calculate_rolling_median(df, column, 10)
+}
+```
+
+Saving the "Watching the Past" df
+
+
+```{r}
+
+
+write.csv(df, file = "data/wtp.csv", row.names = FALSE)
+
+
+
+```
+
+
+
+

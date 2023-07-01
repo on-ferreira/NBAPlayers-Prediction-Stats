@@ -1,5 +1,5 @@
 ---
-title: "Single Player Modeling"
+title: "Screening Many Models"
 author: "orlando"
 date: "`r Sys.Date()`"
 output: html_document
