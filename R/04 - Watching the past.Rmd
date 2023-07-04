@@ -9,6 +9,8 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(zoo)
+library(readr)
+
 
 ```
 
@@ -21,6 +23,18 @@ Furthermore, the columns related to "Advanced Box Score Stats," which are estima
 ```{r reading csv}
 
 df <- read_csv("data/cleanedData.csv") 
+
+calculate_rest_days <- function(data) {
+  data <- data %>% 
+    group_by(Name) %>%
+    mutate(rest_days = c(0, diff(date))) %>%
+    mutate(rest_days = ifelse(rest_days > 30, 0, rest_days))
+  
+  
+  return(data)
+}
+
+df <- calculate_rest_days(df)
 
 columns_to_be_removed <- c("+/-", "TS%", "eFG%", "3PAr", "FTr", "ORB%", "DRB%", "TRB%", "AST%", "STL%", "BLK%", "TOV%", "USG%", "ORtg", "DRtg", "BPM", "date", "location", "year", "month", "day")
 
@@ -35,6 +49,9 @@ df$opp <- as.factor(df$opp)
 
 df
 ```
+
+
+
 Function to calculate the rolling median for a given column
 
 This function calculates the rolling median for a specified column in a data frame.
@@ -46,7 +63,7 @@ Arguments:
 - column: The name of the column for which the rolling median will be calculated.
 - n: The number of games to consider in the rolling window.
 Returns:
- The data frame with additional columns for the rolling medians.
+ The data frame with additional columns for the rolling medians and n/2 rolling medians against the opponent..
 
 Example usage:
  df <- calculate_rolling_median(data, "FG", 10)
@@ -80,11 +97,13 @@ calculate_rolling_median <- function(data, column, n) {
   # Group the data by player name and opponent
   data <- data %>% group_by(Name, opp)
   
-  column_name_opp <- paste0("L", n, "_", column,"_opp")
+  n_opp <- floor(n/2)
+  
+  column_name_opp <- paste0("L", n_opp, "_", column,"_opp")
 
   # Apply the function to calculate the median using rolling window of size 10 per opponent
   data <- data %>%
-    mutate("{column_name_opp}" := rollapply(.data[[column]], width = n, FUN = calculate_median, fill = NA, align = "right",partial=TRUE))%>%
+    mutate("{column_name_opp}" := rollapply(.data[[column]], width = n_opp, FUN = calculate_median, fill = NA, align = "right",partial=TRUE))%>%
     ungroup()
   
   return(data)
@@ -98,16 +117,42 @@ Applying the function on the desired columns and n=10
 columns_to_watch <- c("FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF", "PTS")
 
 for (column in columns_to_watch) {
+  print(column)
   df <- calculate_rolling_median(df, column, 10)
 }
+
 ```
+
+Creating featured engineering for the column Points per Minute (ppm) and applying the changes on it. 
+
+
+```{r}
+
+df$ppm <- df$PTS / df$MP
+
+df <- calculate_rolling_median(df, "ppm", 10)
+
+
+```
+
+
+Now removing the single game data, the same as columns_to_watch and keeping the df forward the past games stats plus the basic data of the actual game in it:
+```{r}
+columns_to_remove <- c("FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF", "ppm")
+
+df <- df[, -which(names(df) %in% columns_to_remove)]
+
+
+```
+
+
 
 Saving the "Watching the Past" df
 
 
 ```{r}
 
-
+df
 write.csv(df, file = "data/wtp.csv", row.names = FALSE)
 
 

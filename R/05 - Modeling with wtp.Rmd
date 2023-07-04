@@ -1,0 +1,207 @@
+---
+title: "05 - Modeling with wtp"
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(purrr)
+library(readr)
+library(tidymodels)
+library(recipes)
+library(conflicted)
+
+```
+
+Reading the data:
+```{r}
+df <- read_csv("data/wtp.csv")
+df
+```
+I'll re-do the models of 02-SP Modeling with recipes.Rmd but this time using the new data and will compare the results at the end:
+```{r}
+
+player_df <- df[df$Name == "nikola_jokic", ]
+player_df
+
+```
+
+
+```{r}
+
+# Count unique values for each variable
+unique_counts <- sapply(player_df, function(x) length(unique(x)))
+
+# Identify columns with only one unique value
+columns_to_drop <- names(unique_counts[unique_counts == 1])
+
+
+set.seed(502)
+player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+player_df_train <- training(player_df_split)
+player_df_test <- testing(player_df_split)
+
+
+simple_recipe <-
+  recipe(PTS ~ ., data = player_df_train) %>%
+  step_rm(all_of(columns_to_drop)) %>%
+    step_dummy(all_nominal_predictors())
+simple_recipe
+
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_wflow <-
+ workflow() %>%
+ add_model(lm_model) %>%
+ add_recipe(simple_recipe)
+lm_wflow
+
+lm_fit <- fit(lm_wflow, player_df_train)
+
+lm_fit %>%
+ extract_recipe(estimated = TRUE)
+
+pdf_test_res <- predict(lm_fit, player_df_test)
+pdf_test_res <- bind_cols(pdf_test_res, player_df_test %>% select(PTS))
+pdf_test_res
+
+ggplot(pdf_test_res, aes(x = PTS, y = .pred)) +
+ # Create a diagonal line:
+ geom_abline(lty = 2) +
+ geom_point(alpha = 0.5) +
+ labs(y = "Predicted PTS", x = "Actual PTS") +
+ # Scale and size the x- and y-axis uniformly:
+ coord_obs_pred()
+
+conflict_prefer("rmse", winner = "yardstick")
+conflict_prefer("rsq", winner = "yardstick")
+conflict_prefer("mae", winner = "yardstick")
+
+#tidymodels_prefer(quiet = FALSE)
+#• modelr::rmse
+#• yardstick::rmse
+player_metrics <- metric_set(rmse, rsq, mae)
+player_metrics(pdf_test_res, truth = PTS, estimate = .pred)
+
+```
+
+RF Model
+```{r}
+
+rf_model <-
+ rand_forest(trees = 1000) %>%
+ set_engine("ranger") %>%
+ set_mode("regression")
+
+rf_wflow <-
+ workflow() %>%
+  add_recipe(simple_recipe) %>%
+ add_model(rf_model)
+
+rf_fit <- rf_wflow %>% fit(data = player_df_train)
+
+```
+
+
+```{r}
+
+estimate_perf <- function(model, dat) {
+ # Capture the names of the `model` and `dat` objects
+ cl <- match.call()
+ obj_name <- as.character(cl$model)
+ data_name <- as.character(cl$dat)
+ data_name <- gsub("player_df_", "", data_name)
+ # Estimate these metrics:
+ reg_metrics <- metric_set(rmse, rsq)
+ model %>%
+ predict(dat) %>%
+ bind_cols(dat %>% select(PTS)) %>%
+ reg_metrics(PTS, .pred) %>%
+ select(-.estimator) %>%
+ mutate(object = obj_name, data = data_name)
+}
+
+# Estimate performance for rf_fit on player_df_train
+rf_train_perf <- estimate_perf(rf_fit, player_df_train)
+
+# Estimate performance for lm_fit on player_df_train
+lm_train_perf <- estimate_perf(lm_fit, player_df_train)
+
+# Estimate performance for lm_fit on player_df_test
+lm_test_perf <- estimate_perf(lm_fit, player_df_test)
+
+# Estimate performance for rf_fit on player_df_test
+rf_test_perf <- estimate_perf(rf_fit, player_df_test)
+
+# Combine the results into a single table
+combined_results <- bind_rows(rf_train_perf, lm_train_perf, lm_test_perf, rf_test_perf)
+combined_results
+
+```
+Folding:
+```{r}
+
+set.seed(1001)
+
+
+player_folds <- vfold_cv(player_df_train, v = 10)
+player_folds
+
+# For the first fold:
+player_folds$splits[[1]] %>% analysis() %>% dim()
+#411 45
+
+
+player_mccv <- mc_cv(player_df_train, prop = 9/10, times = 20)
+
+
+set.seed(1002)
+val_set <- validation_split(player_df_train, prop = 3/4)
+val_set
+
+bt <- bootstraps(player_df_train, times = 5)
+bt
+
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+set.seed(1003)
+rf_res <-
+ rf_wflow %>%
+ fit_resamples(resamples = player_folds, control = keep_pred)
+rf_res
+
+collect_metrics(rf_res)
+
+assess_res <- collect_predictions(rf_res)
+assess_res
+
+assess_res %>%
+ ggplot(aes(x = PTS, y = .pred)) +
+ geom_point(alpha = .15) +
+ geom_abline(color = "red") +
+ coord_obs_pred() +
+ ylab("Predicted")
+
+over_predicted <-
+ assess_res %>%
+ mutate(residual = PTS - .pred) %>%
+ arrange(desc(abs(residual))) %>%
+ slice(1:10)
+over_predicted
+
+```
+Resampling on rf:
+
+```{r}
+val_res <- rf_wflow %>% fit_resamples(resamples = val_set)
+val_res
+collect_metrics(val_res)
+
+```
+
+
+
+
+
