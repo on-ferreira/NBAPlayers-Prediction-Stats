@@ -13,6 +13,8 @@ library(readr)
 library(tidymodels)
 library(recipes)
 library(conflicted)
+library(usemodels)
+library(xgboost)
 
 ```
 
@@ -48,7 +50,7 @@ player_df_test <- testing(player_df_split)
 simple_recipe <-
   recipe(PTS ~ ., data = player_df_train) %>%
   step_rm(all_of(columns_to_drop)) %>%
-    step_dummy(all_nominal_predictors())
+    step_dummy(all_nominal_predictors())    
 simple_recipe
 
 lm_model <- linear_reg() %>% set_engine("lm")
@@ -188,7 +190,7 @@ over_predicted <-
  assess_res %>%
  mutate(residual = PTS - .pred) %>%
  arrange(desc(abs(residual))) %>%
- slice(1:10)
+ dplyr::slice(1:10)
 over_predicted
 
 ```
@@ -200,8 +202,185 @@ val_res
 collect_metrics(val_res)
 
 ```
+```{r}
+
+
+
+```
 
 
 
 
+
+```{r}
+
+
+preproc <- list(simple = simple_recipe)
+lm_models <- workflow_set(preproc, list(lm = linear_reg()), cross = FALSE)
+
+lm_models <-
+ lm_models %>%
+ workflow_map("fit_resamples",
+ seed = 1101, verbose = TRUE,
+ resamples = player_folds, control = keep_pred)
+lm_models
+
+
+use_xgboost(PTS ~ ., data = player_df_train)
+
+xgboost_recipe <-
+  recipe(formula = PTS ~ ., data = player_df_train) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_rm(all_of(columns_to_drop)) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_zv(all_predictors())
+
+xgboost_spec <-
+  boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(),
+             loss_reduction = tune(), sample_size = tune()) %>%
+  set_mode("regression") %>%
+  set_engine("xgboost")
+
+xgboost_workflow <-
+  workflow() %>%
+  add_recipe(xgboost_recipe) %>%
+  add_model(xgboost_spec)
+
+set.seed(69305)
+
+xgboost_tune <-
+  tune_grid(xgboost_workflow,
+            resamples = player_folds,
+            grid = 25)
+
+models <-
+  as_workflow_set(random_forest = rf_res, xgboost_model = xgboost_tune) %>%
+  bind_rows(lm_models)
+
+models
+
+
+```
+
+```{r xgboost}
+use_xgboost(PTS ~ .,
+ data = player_df_train)
+
+xgboost_recipe <-
+ recipe(formula = PTS ~ ., data = player_df_train) %>%
+ step_novel(all_nominal_predictors()) %>%
+  step_rm(all_of(columns_to_drop)) %>%
+ step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+ step_zv(all_predictors())%>%
+  prep()
+
+xgboost_spec <-
+ boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(),
+ loss_reduction = tune(), sample_size = tune()) %>%
+ set_mode("regression") %>%
+ set_engine("xgboost")
+
+xgboost_workflow <-
+ workflow() %>%
+ add_recipe(xgboost_recipe) %>%
+ add_model(xgboost_spec)
+
+set.seed(69305)
+
+xgboost_tune <-
+ tune_grid(xgboost_workflow,
+           resamples = player_folds,
+           grid = 25)
+
+
+
+```
+ Vendo os melhores parametros encontrados pelo tune_grid()
+```{r}
+show_best(xgboost_tune, metric = "rmse", maximize = FALSE)
+
+
+```
+ Coletando as métricas:
+ 
+```{r}
+xgboost_metrics <- collect_metrics(xgboost_tune)
+xgboost_metrics
+
+```
+ 
+Plotando em forma de gráfico:
+```{r}
+autoplot(xgboost_tune, metric = "rmse")
+
+```
+```{r}
+
+xgboost_tuned <- xgboost_tune
+
+xgboost_tuned %>%
+  tune::show_best(metric = "rmse")
+xgboost_tuned
+
+xgboost_best_params <- xgboost_tuned %>%
+  tune::select_best("rmse")
+xgboost_best_params
+
+```
+
+Finalizing the model with the best parameters:
+
+```{r}
+
+
+xgboost_model_final <- xgboost_spec %>% 
+  finalize_model(xgboost_best_params)
+
+
+```
+
+Training:
+
+```{r}
+
+train_processed <- bake(xgboost_recipe,  new_data = player_df_train)
+train_prediction <- xgboost_model_final %>%
+  # fit the model on all the training data
+  fit(
+    formula = PTS ~ ., 
+    data    = train_processed
+  ) %>%
+  # predict the sale prices for the training data
+  predict(new_data = train_processed) %>%
+  bind_cols(player_df_train)
+
+xgboost_score_train <- 
+  train_prediction %>%
+  yardstick::metrics(PTS, .pred) %>%
+  mutate(.estimate = format(round(.estimate, 2), big.mark = ","))
+
+xgboost_score_train
+
+```
+Agora usando o player_df_test:
+```{r}
+
+test_processed  <- bake(xgboost_recipe, new_data = player_df_test)
+test_prediction <- xgboost_model_final %>%
+  # fit the model on all the training data
+  fit(
+    formula = PTS ~ ., 
+    data    = train_processed
+  ) %>%
+  
+  # use the training model fit to predict the test data
+  predict(new_data = test_processed) %>%
+  bind_cols(player_df_test)
+# measure the accuracy of our model using `yardstick`
+xgboost_score <- 
+  test_prediction %>%
+  yardstick::metrics(PTS, .pred) %>%
+  mutate(.estimate = format(round(.estimate, 2), big.mark = ","))
+xgboost_score
+```
 

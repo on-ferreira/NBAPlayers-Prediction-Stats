@@ -40,8 +40,6 @@ columns_to_be_removed <- c("+/-", "TS%", "eFG%", "3PAr", "FTr", "ORB%", "DRB%", 
 
 df <- df[, !(names(df) %in% columns_to_be_removed)]
 
-df$home <- as.logical(df$home)
-
 # Convert "opp" column to factor for grouping
 df$opp <- as.factor(df$opp)
 
@@ -68,7 +66,7 @@ Returns:
 Example usage:
  df <- calculate_rolling_median(data, "FG", 10)
  Calculates the rolling median of Field Goals (FG) for the last 10 games.
-
+ Edit: The function now excludes the actual game and return the median for the 10 games before the actual game. [More realistic approach]
 
 The resulting data frame will have additional columns with names following the format "LN_stat" for the player's last 10 game medians and "LN_stat_opp" for the player's last N game medians against the specified team.
 
@@ -78,7 +76,11 @@ To use the function, pass the data frame, column, and the desired length of medi
 
 # Create a function to calculate the median
 calculate_median <- function(x) {
-  median(x, na.rm = TRUE)
+  if (length(x) == 1) {
+    return(0)
+  } else {
+    return(median(x[-length(x)], na.rm = TRUE))
+  }
 }
 
 
@@ -90,7 +92,7 @@ calculate_rolling_median <- function(data, column, n) {
   
   # Apply the function to calculate the rolling median using a window of size 10
   data <- data %>%
-    mutate("{column_name}" := rollapply(.data[[column]], width = n, FUN = calculate_median,
+    mutate("{column_name}" := rollapply(.data[[column]], width = (n+1), FUN = calculate_median,
                                   fill = NA, align = "right", partial = TRUE)) %>%
     ungroup()
   
@@ -103,8 +105,10 @@ calculate_rolling_median <- function(data, column, n) {
 
   # Apply the function to calculate the median using rolling window of size 10 per opponent
   data <- data %>%
-    mutate("{column_name_opp}" := rollapply(.data[[column]], width = n_opp, FUN = calculate_median, fill = NA, align = "right",partial=TRUE))%>%
-    ungroup()
+    mutate("{column_name_opp}" := rollapply(.data[[column]], width = (n_opp+1), FUN = calculate_median, fill = NA, align = "right",partial=TRUE))
+
+  data <- data %>% ungroup()
+  
   
   return(data)
 }
