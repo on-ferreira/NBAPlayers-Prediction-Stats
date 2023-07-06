@@ -11,11 +11,21 @@ library(dplyr)
 library(purrr)
 library(readr)
 library(tidymodels)
+tidymodels_prefer()
 library(recipes)
 library(conflicted)
 library(usemodels)
 library(xgboost)
+library(ggrepel)
+library(corrr)
+library(tidyposterior)
+library(rstanarm)
+library(baguette)
 
+# speed up computation with parrallel processing (optional)
+library(doParallel)
+all_cores <- parallel::detectCores(logical = FALSE)
+registerDoParallel(cores = all_cores)
 ```
 
 Reading the data:
@@ -202,7 +212,11 @@ val_res
 collect_metrics(val_res)
 
 ```
+
 ```{r}
+
+normalized_rec <- simple_recipe %>%
+  step_normalize(all_numeric_predictors()) 
 
 
 
@@ -211,11 +225,10 @@ collect_metrics(val_res)
 
 
 
-
 ```{r}
 
 
-preproc <- list(simple = simple_recipe)
+preproc <- list(simple = simple_recipe, norm = normalized_rec)
 lm_models <- workflow_set(preproc, list(lm = linear_reg()), cross = FALSE)
 
 lm_models <-
@@ -226,41 +239,93 @@ lm_models <-
 lm_models
 
 
-use_xgboost(PTS ~ ., data = player_df_train)
 
-xgboost_recipe <-
-  recipe(formula = PTS ~ ., data = player_df_train) %>%
-  step_novel(all_nominal_predictors()) %>%
-  step_rm(all_of(columns_to_drop)) %>%
-  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
-  step_zv(all_predictors())
+```
 
-xgboost_spec <-
-  boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(),
-             loss_reduction = tune(), sample_size = tune()) %>%
-  set_mode("regression") %>%
-  set_engine("xgboost")
 
-xgboost_workflow <-
-  workflow() %>%
-  add_recipe(xgboost_recipe) %>%
-  add_model(xgboost_spec)
+```{r}
 
-set.seed(69305)
-
-xgboost_tune <-
-  tune_grid(xgboost_workflow,
-            resamples = player_folds,
-            grid = 25)
 
 models <-
-  as_workflow_set(random_forest = rf_res, xgboost_model = xgboost_tune) %>%
+  as_workflow_set(random_forest = rf_res) %>%
   bind_rows(lm_models)
-
 models
 
 
+autoplot(models, metric = "rsq") +
+ geom_text_repel(aes(label = wflow_id), nudge_x = 1/8, nudge_y = 1/100) +
+ theme(legend.position = "none")
+
+rsq_indiv_estimates <-
+ collect_metrics(models, summarize = FALSE) %>%
+ filter(.metric == "rsq")
+
+rsq_wider <-
+ rsq_indiv_estimates %>%
+ select(wflow_id, .estimate, id) %>%
+ pivot_wider(id_cols = "id", names_from = "wflow_id", values_from = ".estimate")
+rsq_wider
+
+corrr::correlate(rsq_wider %>% select(-id), quiet = TRUE)
+
+
+rsq_indiv_estimates %>%
+ mutate(wflow_id = reorder(wflow_id, .estimate)) %>%
+ ggplot(aes(x = wflow_id, y = .estimate, group = id, color = id, lty = id)) +
+ geom_line(alpha = .8, lwd = 1.25) +
+ theme(legend.position = "none")
+
+
+rsq_wider %>%
+ with( cor.test(random_forest, simple_lm) ) %>%
+ tidy() %>%
+ select(estimate, starts_with("conf"))
+
+
+# The rstanarm package creates copious amounts of output; those results
+# are not shown here but are worth inspecting for potential issues. The
+# option `refresh = 0` can be used to eliminate the logging.
+rsq_anova <-
+ perf_mod(
+ models,
+ metric = "rsq",
+ prior_intercept = rstanarm::student_t(df = 1),
+ chains = 4,
+ iter = 5000,
+ seed = 1102
+ )
+
+
+model_post <-
+ rsq_anova %>%
+ # Take a random sample from the posterior distribution
+ # so set the seed again to be reproducible.
+ tidy(seed = 1103)
+glimpse(model_post)
+
+
+model_post %>%
+ mutate(model = forcats::fct_inorder(model)) %>%
+ ggplot(aes(x = posterior)) +
+ geom_histogram(bins = 50, color = "white", fill = "blue", alpha = 0.4) +
+ facet_wrap(~ model, ncol = 1)
+#Posterior for mean R²
+
+
+autoplot(rsq_anova) +
+ geom_text_repel(aes(label = workflow), nudge_x = 1/8, nudge_y = 1/100) +
+ theme(legend.position = "none")
+
 ```
+
+
+
+
+
+
+
+
+
 
 ```{r xgboost}
 use_xgboost(PTS ~ .,
@@ -383,4 +448,8 @@ xgboost_score <-
   mutate(.estimate = format(round(.estimate, 2), big.mark = ","))
 xgboost_score
 ```
+
+So far the results are significantly better than when I was using PTS as predicted column. Also the warning on "rank-deficient model" dissapeared. Which I assume is another good news.
+Now I'll do the same as 03 - Screening Many Models with this new data to compare results.
+
 

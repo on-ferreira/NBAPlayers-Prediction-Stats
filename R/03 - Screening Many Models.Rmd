@@ -204,16 +204,6 @@ poly_recipe <-
 ```
 
 Testando os modelos um a um para encontrar onde está o erro:
-lm_model <- linear_reg() %>% set_engine("lm") <- OK
-
-hidden_units = tune()
-Error in sum(net$n) : invalid 'type' (list) of argument
-penalty = tune()
-Error in rep(decay, length(wts)) : 
-  attempt to replicate an object of type 'language'
-epochs = tune()
-Error in nnet.default(x, y, w, ...) : 
-  'language' object cannot be coerced to type 'integer'
 
  
 ```{r}

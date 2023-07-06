@@ -1,0 +1,412 @@
+---
+title: "S.M.M.W.T.P."
+author: "orlando"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(dplyr)
+library(purrr)
+library(readr)
+library(tidymodels)
+tidymodels_prefer()
+library(recipes)
+library(conflicted)
+library(usemodels)
+library(xgboost)
+library(ggrepel)
+library(corrr)
+library(tidyposterior)
+library(rstanarm)
+library(baguette)
+
+# speed up computation with parrallel processing (optional)
+library(doParallel)
+all_cores <- parallel::detectCores(logical = FALSE)
+#Create cluster with desired number of cores, leave one open for the machine         
+#core processes
+cl <- makeCluster(all_cores[1]-1)
+registerDoParallel(cores = all_cores)
+
+
+```
+
+
+Reading the data:
+```{r}
+df <- read_csv("data/wtp.csv")
+df
+```
+
+
+```{r}
+
+
+player_df <- df[df$Name == "nikola_jokic", ]
+player_df
+
+player_df$home <- NULL
+player_df$Name <- NULL
+player_df$team <- NULL
+player_df
+
+
+set.seed(502)
+player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+player_df_train <- training(player_df_split)
+player_df_test <- testing(player_df_split)
+
+
+set.seed(1001)
+player_folds <- vfold_cv(player_df_train, v = 10, repeats = 5)
+
+
+new_rec <-
+  recipe(PTS ~ ., data = player_df_train) %>%
+    step_dummy(all_nominal_predictors())  %>%
+  step_zv(all_predictors()) 
+
+
+new_normalized_rec <- simple_recipe %>%
+  step_normalize(all_numeric_predictors()) 
+
+
+new_rec
+```
+
+
+
+```{r}
+
+
+linear_reg_spec <-
+ linear_reg(penalty = tune(), mixture = tune()) %>%
+ set_engine("glmnet")
+
+nnet_spec <-
+ mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+ set_engine("nnet", MaxNWts = 2600) %>%
+ set_mode("regression")
+
+mars_spec <-
+ mars(prod_degree = tune()) %>% #<- use GCV to choose terms
+ set_engine("earth") %>%
+ set_mode("regression")
+
+svm_r_spec <-
+ svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+svm_p_spec <-
+ svm_poly(cost = tune(), degree = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+knn_spec <-
+ nearest_neighbor(neighbors = tune(), dist_power = tune(), weight_func = tune()) %>%
+ set_engine("kknn") %>%
+ set_mode("regression")
+
+cart_spec <-
+ decision_tree(cost_complexity = tune(), min_n = tune()) %>%
+ set_engine("rpart") %>%
+ set_mode("regression")
+
+rf_spec <-
+ rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+ set_engine("ranger") %>%
+ set_mode("regression")
+
+
+cubist_spec <-
+ cubist_rules(committees = tune(), neighbors = tune()) %>%
+ set_engine("Cubist")
+
+
+
+```
+
+Adicionando hidden_units na NN
+
+```{r}
+
+nnet_param <-
+ nnet_spec %>%
+ extract_parameter_set_dials() %>%
+ recipes::update(hidden_units = hidden_units(c(1, 27)))
+
+```
+
+
+Non-Linear models
+
+```{r}
+normalized <-
+ workflow_set(
+ preproc = list(simple = new_rec),
+ models = list(SVM_radial = svm_r_spec, SVM_poly = svm_p_spec,
+ KNN = knn_spec, neural_network = nnet_spec)
+ )
+normalized
+```
+
+```{r}
+normalized %>% extract_workflow(id = "simple_KNN")
+
+```
+Adicionando NN parameter object
+
+```{r}
+normalized <-
+ normalized %>%
+ option_add(param_info = nnet_param, id = "simple_neural_network")
+normalized
+```
+
+Adicionando NN parameter object
+
+```{r}
+normalized <-
+ normalized %>%
+ option_add(param_info = nnet_param, id = "simple_neural_network")
+normalized
+```
+
+```{r}
+library(rules)
+model_vars <-
+ workflow_variables(outcomes = PTS,
+ predictors = everything())
+
+no_pre_proc <-
+ workflow_set(
+ preproc = list(simple = model_vars),
+ models = list(MARS = mars_spec,
+ CART = cart_spec,
+ RF = rf_spec,
+ Cubist = cubist_spec)
+ )
+no_pre_proc
+```
+Finally, we assemble the set that uses nonlinear terms and interactions with the
+appropriate models:
+```{r}
+with_features <-
+ workflow_set(
+ preproc = list(norm = new_normalized_rec),
+ models = list(linear_reg = linear_reg_spec, KNN = knn_spec)
+ )
+```
+These objects are tibbles with the extra class of workflow_set. Row binding does not
+affect the state of the sets, and the result is itself a workflow set:
+
+```{r}
+all_workflows <-
+ bind_rows(no_pre_proc, normalized, with_features) %>%
+ # Make the workflow IDs a little more simple:
+ mutate(wflow_id = gsub("(simple_)|(normalized_)", "", wflow_id))
+all_workflows
+```
+
+Criando grid control e grid results
+```{r}
+
+
+grid_ctrl <-
+ control_grid(
+ save_pred = TRUE,
+ parallel_over = "everything",
+ save_workflow = TRUE
+ )
+grid_ctrl
+
+```
+
+
+```{r}
+
+grid_results <-
+ all_workflows %>%
+ workflow_map(
+ seed = 1503,
+ resamples = player_folds,
+ grid = 25,
+ control = grid_ctrl, 
+ verbose = TRUE
+ )
+ grid_results
+ 
+```
+
+
+ ---------------------------------------------------------------------------
+The results show that the option and result columns have been updated:
+
+```{r}
+
+grid_ctrl <-
+ control_grid(
+ save_pred = TRUE,
+ save_workflow = TRUE
+ )
+
+full_results_time <-
+ system.time(
+ grid_results <-
+ all_workflows %>%
+ workflow_map(seed = 1503, resamples = player_folds, grid = 25,
+ control = grid_ctrl, verbose = TRUE)
+ )
+
+
+```
+
+```{r}
+num_grid_models <- nrow(collect_metrics(grid_results, summarize = FALSE))
+
+```
+
+```{r}
+grid_results
+```
+
+
+If none of the models crash, continue from here:
+
+
+Avaliando resultado doss modelos:
+```{r}
+grid_results %>%
+ rank_results() %>%
+ filter(.metric == "rmse") %>%
+ select(model, .config, rmse = mean, rank)
+```
+
+rmsw x Workflow Rank
+
+```{r}
+autoplot(
+ grid_results,
+ rank_metric = "rmse", # <- how to order models
+ metric = "rmse", # <- which metric to visualize
+ select_best = TRUE # <- one point per workflow
+) +
+ geom_text(aes(y = mean - 1/2, label = wflow_id), angle = 90, hjust = 1) +
+ lims(y = c(3.5, 9.5)) +
+ theme(legend.position = "none")
+```
+
+autoplot() for NN:
+```{r}
+autoplot(grid_results, id = "Cubist", metric = "rmse")
+
+```
+
+Efficiently Screening Models with control_race()
+```{r}
+library(finetune)
+race_ctrl <-
+ control_race(
+ save_pred = TRUE,
+ parallel_over = "everything",
+ save_workflow = TRUE
+ )
+
+race_results <-
+ all_workflows %>%
+ workflow_map(
+ "tune_race_anova",
+ seed = 1503,
+ resamples = player_folds,
+ grid = 25,
+ control = race_ctrl,
+ verbose = TRUE
+ )
+
+race_results
+```
+
+
+```{r}
+
+
+autoplot(
+ race_results,
+ rank_metric = "rmse",
+ metric = "rmse",
+ select_best = TRUE
+) +
+ geom_text(aes(y = mean - 1/2, label = wflow_id), angle = 90, hjust = 1) +
+ lims(y = c(3.0, 11)) +
+ theme(legend.position = "none")
+
+```
+Did we get similar results? For both objects, we rank the results, merge them, and
+plot them against one another:
+
+```{r}
+matched_results <-
+ rank_results(race_results, select_best = TRUE) %>%
+ select(wflow_id, .metric, race = mean, config_race = .config) %>%
+ inner_join(
+ rank_results(grid_results, select_best = TRUE) %>%
+ select(wflow_id, .metric, complete = mean,
+ config_complete = .config, model),
+ by = c("wflow_id", ".metric"),
+ ) %>%
+ filter(.metric == "rmse")
+
+matched_results %>%
+ ggplot(aes(x = complete, y = race)) +
+ geom_abline(lty = 3) +
+ geom_point() +
+ geom_text_repel(aes(label = model)) +
+ coord_obs_pred() +
+ labs(x = "Complete Grid RMSE", y = "Racing RMSE")
+```
+
+Finalizing a Model
+
+```{r}
+best_results <-
+ race_results %>%
+ extract_workflow_set_result("Cubist") %>%
+ select_best(metric = "rmse")
+best_results
+
+```
+
+
+Select the model with the best rank and metrics to further investigation
+
+```{r}
+
+cubist_test_results <-
+ race_results %>%
+ extract_workflow("Cubist") %>%
+ finalize_workflow(best_results) %>%
+ last_fit(split = player_df_split)
+collect_metrics(cubist_test_results)
+
+
+```
+
+
+```{r}
+
+cubist_test_results %>%
+ collect_predictions() %>%
+ ggplot(aes(x = PTS, y = .pred)) +
+ geom_abline(color = "gray50", lty = 2) +
+ geom_point(alpha = 0.5) +
+ coord_obs_pred() +
+ labs(x = "observed", y = "predicted")
+
+
+```
+
