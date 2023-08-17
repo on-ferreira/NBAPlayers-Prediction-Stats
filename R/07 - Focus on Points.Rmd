@@ -1,13 +1,11 @@
 ---
-title: "S.M.M.W.T.P."
-author: "orlando"
-date: "`r Sys.Date()`"
+title: "Points-Focusing"
 output: html_document
+date: "2023-08-17"
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-
 
 library(dplyr)
 library(purrr)
@@ -36,16 +34,59 @@ all_cores <- parallel::detectCores(logical = FALSE)
 cl <- makeCluster(all_cores[1]-1)
 registerDoParallel(cores = all_cores)
 
-
 ```
-
 
 Reading the data:
 ```{r}
 df <- read_csv("data/wtp.csv")
 df
 ```
+Removerei as colunas não-relacionadas diretamente a PTS para analisar o impacto que isso trará ao modelo.
+Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK.
 
+```{r}
+print(names(df))
+
+
+# Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK
+df <- df[, -c(23:34)]
+
+
+```
+Imprimir nomes das colunas restantes
+
+```{r}
+print(names(df))
+```
+
+
+Plot do heatmap para analisar a correlação das colunas
+```{r}
+
+numerical_df <- df[, sapply(df, is.numeric) & !(names(df) %in% c("opp", "team"))]
+
+
+# Correlation matrix with teams and seasonal data
+correlation_matrix <- cor(numerical_df)
+corrplot(correlation_matrix, method = "circle")
+```
+Vejo alguns valores com uma correlação bem alta.
+Filtrar e imprimir os valores onde |R²| > 0.8
+
+```{r}
+high_correlation <- which(abs(correlation_matrix) > 0.8 & correlation_matrix != 1, arr.ind = TRUE)
+for (i in 1:nrow(high_correlation)) {
+  row <- high_correlation[i, 1]
+  col <- high_correlation[i, 2]
+  cor_value <- correlation_matrix[row, col]
+  col_name1 <- colnames(correlation_matrix)[row]
+  col_name2 <- colnames(correlation_matrix)[col]
+  print(paste("Absolute Correlation between", col_name1, "and", col_name2, ":", cor_value))
+}
+```
+TODO: Pensar mais sobre isso. Várias colunas correlacionadas e um modelo de tipo preditivo.
+
+Repetindo o WTP para ver os resultados e comparar com antes da remoção de colunas.
 
 ```{r}
 
@@ -414,4 +455,12 @@ cubist_test_results %>%
 
 
 ```
+As variaveis não-relacionadas a pontos tiveram um resultado de:
+rmse	standard	6.5521897	Preprocessor1_Model1	
+rsq	standard	0.5160671	Preprocessor1_Model1
 
+Enquanto que no modelo testado os resultados foram de:
+rmse	standard	6.5374182	Preprocessor1_Model1	
+rsq	standard	0.5160422	Preprocessor1_Model1
+
+Resultados quase iguais, mostrando que não teve muita diferença entre os modelos testados.
