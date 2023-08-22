@@ -48,7 +48,7 @@ Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK.
 print(names(df))
 
 
-# Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK
+# Remover colunas relacionadas a ORB, DRB,  TRB, AST, STL, BLK
 df <- df[, -c(23:34)]
 
 
@@ -325,12 +325,12 @@ grid_results
 If none of the models crash, continue from here:
 
 
-Avaliando resultado doss modelos:
+Avaliando resultado dos modelos:
 ```{r}
 grid_results %>%
  rank_results() %>%
  filter(.metric == "rsq") %>%
- select(model, .config, rmse = mean, rank)
+ select(model, .config, rsq = mean, rank)
 ```
 
 rmsw x Workflow Rank
@@ -349,7 +349,7 @@ autoplot(
 
 autoplot() for Cubist:
 ```{r}
-autoplot(grid_results, id = "RF", metric = "rmse")
+autoplot(grid_results, id = "Cubist", metric = "rmse")
 
 ```
 
@@ -383,12 +383,12 @@ race_results
 
 autoplot(
  race_results,
- rank_metric = "rmse",
- metric = "rmse",
+ rank_metric = "rsq",
+ metric = "rsq",
  select_best = TRUE
 ) +
  geom_text(aes(y = mean - 1/2, label = wflow_id), angle = 90, hjust = 1) +
- lims(y = c(3.0, 11)) +
+ lims(y = c(-1, 1)) +
  theme(legend.position = "none")
 
 ```
@@ -421,7 +421,7 @@ Finalizing a Model
 ```{r}
 best_results <-
  race_results %>%
- extract_workflow_set_result("Cubist") %>%
+ extract_workflow_set_result("RF") %>%
  select_best(metric = "rmse")
 best_results
 
@@ -432,12 +432,12 @@ Select the model with the best rank and metrics to further investigation
 
 ```{r}
 
-cubist_test_results <-
+rf_test_results <-
  race_results %>%
  extract_workflow("Cubist") %>%
  finalize_workflow(best_results) %>%
  last_fit(split = player_df_split)
-collect_metrics(cubist_test_results)
+collect_metrics(rf_test_results)
 
 
 ```
@@ -445,7 +445,7 @@ collect_metrics(cubist_test_results)
 
 ```{r}
 
-cubist_test_results %>%
+rf_test_results %>%
  collect_predictions() %>%
  ggplot(aes(x = PTS, y = .pred)) +
  geom_abline(color = "gray50", lty = 2) +

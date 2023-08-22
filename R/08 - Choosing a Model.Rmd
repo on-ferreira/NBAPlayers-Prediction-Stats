@@ -1,0 +1,298 @@
+---
+title: "Decidindo um modelo"
+output: html_document
+date: "2023-08-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(purrr)
+library(readr)
+library(tidymodels)
+tidymodels_prefer()
+library(recipes)
+library(conflicted)
+library(usemodels)
+library(ggrepel)
+library(corrr)
+library(tidyposterior)
+library(rstanarm)
+library(baguette)
+library(ranger)
+library(rules)
+
+
+# speed up computation with parrallel processing (optional)
+library(doParallel)
+all_cores <- parallel::detectCores(logical = FALSE)
+#Create cluster with desired number of cores, leave one open for the machine         
+#core processes
+cl <- makeCluster(all_cores[1]-1)
+registerDoParallel(cores = all_cores)
+
+```
+
+### Foco na Avaliação entre Cubist e Random Forests
+
+Neste relatório, vamos comparar o desempenho dos modelos Cubist e Random Forests na previsão de pontos (PTS) de jogadores de basquete. Utilizaremos a biblioteca tidymodels para criar e avaliar os modelos.
+
+#### Pré-processamento e Exploração dos Dados
+
+Após a leitura dos dados, realizamos um pré-processamento removendo as colunas não diretamente relacionadas a PTS. Também exploramos a correlação entre as variáveis usando um heatmap. Encontramos algumas correlações significativas, o que pode influenciar o desempenho dos modelos.
+
+#### Preparação dos Dados
+
+Selecionamos um jogador, por exemplo, "nikola_jokic", e dividimos os dados em conjuntos de treinamento e teste. O pré-processamento incluiu criação de variáveis dummies e normalização dos dados.
+
+#### Definição dos Modelos
+
+Definimos diferentes modelos para avaliação, incluindo:
+
+Modelos Lineares: Linear Regression e Multilayer Perceptron (MLP) Modelos Não-Lineares: MARS, Árvore de Decisão, Random Forest e Cubist Avaliação dos Modelos
+
+Usamos validação cruzada e diferentes métricas, como RMSE e R-squared, para avaliar o desempenho dos modelos. Também utilizamos visualizações, como gráficos de dispersão, para comparar as previsões dos modelos com os valores reais.
+
+#### Comparação e Seleção dos Modelos
+
+Comparamos os resultados de todos os modelos testados, enfocando os modelos Cubist e Random Forests. Consideramos métricas de desempenho, como RMSE e R-squared, para determinar qual modelo tem melhor performance na previsão de pontos.
+
+#### Escolha do Modelo e Conclusões
+
+Após uma análise abrangente, selecionamos o modelo com melhor desempenho. No caso específico deste relatório, se o modelo Cubist ou Random Forests tiver uma vantagem significativa em termos de métricas de avaliação, recomendamos escolher esse modelo para previsões futuras. No entanto, é importante lembrar que a escolha final deve ser baseada em uma análise completa, levando em consideração a interpretabilidade do modelo, escalabilidade e necessidades específicas do projeto.
+
+Lembramos que os resultados e conclusões podem variar de acordo com a natureza dos dados e os cenários de uso.
+
+Nota: Este relatório é baseado na análise realizada com os modelos Cubist e Random Forests e fornece insights sobre a comparação entre esses dois modelos. Os resultados podem variar para diferentes conjuntos de dados e cenários.
+
+### Resultados da Avaliação do Desempenho dos Modelos com o jogador Nikola Jokic
+
+#### Random Forest
+
+-   **RMSE (Erro Quadrático Médio):** 6.988281
+-   **R-squared (Coeficiente de Determinação):** 0.437179
+
+O modelo Random Forest apresentou um RMSE de aproximadamente 6.99 e um R-squared de 0.44. Isso indica que o modelo, em média, tem um erro de previsão de cerca de 6.99 unidades, e ele é capaz de explicar cerca de 43.72% da variação nos dados de saída. Esses resultados sugerem um desempenho razoável na previsão das estatísticas dos jogadores.
+
+#### Cubist
+
+-   **RMSE (Erro Quadrático Médio):** 6.5374182
+-   **R-squared (Coeficiente de Determinação):** 0.5160422
+
+Por outro lado, o modelo Cubist obteve um RMSE de cerca de 6.54 e um R-squared de 0.52. Isso indica que o Cubist tem um erro de previsão médio de aproximadamente 6.54 unidades e é capaz de explicar cerca de 51.60% da variação nos dados de saída. Esses resultados sugerem um desempenho um pouco melhor em comparação com o Random Forest.
+
+
+
+```{r}
+set.seed(123)
+
+# Definir a lista de jogadores
+lista_jogadores <- c("nikola_jokic", "lebron_james", "stephen_curry", "demar_derozan", "giannis_antetokounmpo")
+
+# Ler os dados
+df <- read_csv("data/wtp.csv")
+
+# Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK
+df <- df[, -c(23:34)]
+
+# Inicializar um dataframe para os resultados
+results_df <- data.frame(Player = character(0), Model = character(0), metric = character(0), value = numeric(0), config = character(0), rank = numeric(0))
+
+# Definição dos modelos
+rf_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+cubist_spec <-
+  cubist_rules(committees = tune(), neighbors = tune()) %>%
+  set_engine("Cubist")
+
+# Loop para cada jogador na lista
+for (jogador in lista_jogadores) {
+  # ... (código para preparação de dados, divisão, etc.)
+  player_df <- df[df$Name == jogador, ]
+  player_df$home <- NULL
+  player_df$Name <- NULL
+  player_df$team <- NULL
+  
+  player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+  player_df_train <- training(player_df_split)
+  player_folds <- vfold_cv(player_df_train, v = 10, repeats = 5)
+  
+  # Definição das receitas
+  new_rec <-
+    recipe(PTS ~ ., data = player_df_train) %>%
+    step_dummy(all_nominal_predictors())  %>%
+    step_zv(all_predictors()) 
+  
+  new_normalized_rec <- new_rec %>%
+    step_normalize(all_numeric_predictors()) 
+  
+  model_vars <-
+ workflow_variables(outcomes = PTS,
+ predictors = everything())
+  
+  # Definindo workflows
+  no_pre_proc <- workflow_set(
+    preproc = list(simple = model_vars),
+    models = list(
+      RF = rf_spec,
+      Cubist = cubist_spec
+    )
+  )
+  
+  with_features <- workflow_set(
+    preproc = list(norm = new_normalized_rec),
+    models = list(
+      RF = rf_spec
+    )
+  )
+
+  all_workflows <-
+   bind_rows(no_pre_proc, with_features) %>%
+   # Make the workflow IDs a little more simple:
+   mutate(wflow_id = gsub("(simple_)|(normalized_)", "", wflow_id))
+  
+  # Criando grid control e grid results
+  
+  grid_ctrl <-
+    control_grid(
+      save_pred = TRUE,
+      parallel_over = "everything",
+      save_workflow = TRUE
+    )
+  
+  grid_results <-
+    all_workflows %>%
+    workflow_map(
+      seed = 1503,
+      resamples = player_folds,
+      grid = 25,
+      control = grid_ctrl,
+      verbose = TRUE
+    )
+  
+  num_grid_models <- nrow(collect_metrics(grid_results, summarize = FALSE))
+  
+  # Avaliar resultado dos modelos
+  results_summary <- grid_results %>%
+    rank_results() %>%
+    filter(.metric %in% c("rsq", "rmse")) %>%
+    select(model, .config, metric = .metric, value = mean, rank)
+  
+  # Extrair os resultados e adicionar ao dataframe
+  for (i in 1:nrow(results_summary)) {
+    model_name <- results_summary$model[i]
+    metric <- results_summary$metric[i]
+    value <- results_summary$value[i]
+    config <- results_summary$.config[i]
+    rank <- results_summary$rank[i]
+    
+    # Adicionar uma nova linha para o modelo
+  new_row <- data.frame(Player = jogador, Model = model_name, metric = metric, value = value, config = config, rank = rank)
+  results_df <- rbind(results_df, new_row)
+  }
+}
+
+results_df
+```
+
+Na primeira vez estou rodando para visualizar quais os melhores modelos para cada jogador, com essa informação pretendo descobrir se realmente o Cubist é o melhor entre os dois modelos, ou se eles vão performar de forma não satisfatória para os outros jogadores.
+```{r}
+
+# Filtrar os 3 melhores modelos por jogador com base na métrica "rsq"
+top3_models_rsq <- results_df %>%
+  group_by(Player) %>%
+  filter(metric == "rsq") %>%
+  arrange(Player, metric, desc(value)) %>%
+  slice_head(n = 2)
+
+print(top3_models_rsq)
+
+top3_models_rmse <- results_df %>%
+  group_by(Player) %>%
+  filter(metric == "rmse") %>%
+  arrange(Player,  value) %>%
+  slice_head(n = 2)
+
+print(top3_models_rmse)
+```
+
+
+```{r}
+
+library(ggplot2)
+
+# Filtrar os resultados para os modelos Rand Forest e Cubist Rules por rsq e rmse
+rf_rsq_results <- results_df %>%
+  filter(Model == "rand_forest")%>%
+  filter(metric == "rsq")
+
+cubist_rmse_results <- results_df %>%
+  filter(Model == "cubist_rules")%>%
+  filter(metric == "rmse")
+
+cubist_rsq_results <- results_df %>%
+  filter(Model == "cubist_rules")%>%
+  filter(metric == "rsq")
+
+rf_rmse_results <- results_df %>%
+  filter(Model == "rand_forest")%>%
+  filter(metric == "rmse")
+
+# Criar um dataframe para a legenda personalizada
+legend_data <- data.frame(
+  shape = c("Random Forest", "Cubist"),
+  label = c("Random Forest", "Cubist")
+)
+
+
+# Criar um gráfico de dispersão comparando as previsões dos modelos para RMSE
+ggplot() +
+  geom_point(data = rf_rsq_results, aes(x = config, y = value, color = Player, shape = "Random Forest"), size = 3) +
+  geom_point(data = cubist_rsq_results, aes(x = config, y = value, color = Player, shape = "Cubist"), size = 3) +
+  geom_text(data = legend_data, aes(x = Inf, y = Inf, label = label), 
+            hjust = 0, vjust = 0, inherit.aes = FALSE, show.legend = FALSE) +
+  labs(title = "Comparação entre Random Forest e Cubist (RSQ)",
+       x = "Modelo",
+       y = "RMSE",
+       color = "Player",
+       shape = "Modelo") +
+  scale_color_discrete(name = "Jogador") +
+  scale_shape_manual(name = "", values = c("Random Forest" = 19, "Cubist" = 2)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Criar um gráfico de dispersão comparando as previsões dos modelos para RSQ
+ggplot() +
+  geom_point(data = rf_rmse_results, aes(x = config, y = value, color = Player, shape = "Random Forest"), size = 3) +
+  geom_point(data = cubist_rmse_results, aes(x = config, y = value, color = Player, shape = "Cubist"), size = 3) +
+  geom_text(data = legend_data, aes(x = Inf, y = Inf, label = label), 
+            hjust = 0, vjust = 0, inherit.aes = FALSE, show.legend = FALSE) +
+  labs(title = "Comparação entre Random Forest e Cubist (RMSE)",
+       x = "Modelo",
+       y = "RMSE",
+       color = "Player",
+       shape = "Modelo") +
+  scale_color_discrete(name = "Jogador") +
+  scale_shape_manual(name = "", values = c("Random Forest" = 19, "Cubist" = 2)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+#Triangulo = Cubist
+#Bola = Random Forest
+
+```
+
+
+### Escolhendo o Modelo
+
+Comparando os resultados, vemos que ambos os modelos têm desempenhos próximos. No entanto, o Random Forest obteve desempenhos ligeiramente superiores em termos de RMSE e R-squared. Isso pode indicar que o Random Forest está sendo capaz de ajustar-se mais precisamente aos dados.
+
+No final, a escolha entre esses dois modelos dependerá de outros fatores também, como a interpretabilidade das regras geradas pelo Cubist e a escalabilidade dos modelos para grandes volumes de dados. Dito isso, considerando o desempenho ligeiramente melhor do Random Forest em nossas métricas avaliadas, ele pode ser a opção recomendada.
+
+Lembrando que a decisão final deve ser tomada considerando uma análise mais aprofundada das características dos modelos, suas limitações e as necessidades específicas do projeto.
+
+*Nota: Os resultados e conclusões são baseados nas métricas apresentadas e podem variar de acordo com a natureza dos dados e os cenários de uso.* *Nota2: Agora vou testar alguns outros jogadores e comparar o resultado dos modelos Cubist e Random Forest.*
