@@ -213,14 +213,6 @@ normalized <-
 normalized
 ```
 
-Adicionando NN parameter object
-
-```{r}
-normalized <-
- normalized %>%
- option_add(param_info = nnet_param, id = "simple_neural_network")
-normalized
-```
 
 ```{r}
 library(rules)

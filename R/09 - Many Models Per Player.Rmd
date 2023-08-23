@@ -1,0 +1,414 @@
+---
+title: "09 - Many Models Per Player"
+output: html_document
+date: "2023-08-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(purrr)
+library(readr)
+library(tidymodels)
+tidymodels_prefer()
+library(recipes)
+library(conflicted)
+library(usemodels)
+library(ggrepel)
+library(corrr)
+library(tidyposterior)
+library(rstanarm)
+library(baguette)
+library(ranger)
+library(rules)
+library(ggplot2)
+
+
+# speed up computation with parrallel processing (optional)
+library(doParallel)
+all_cores <- parallel::detectCores(logical = FALSE)
+#Create cluster with desired number of cores, leave one open for the machine         
+#core processes
+cl <- makeCluster(all_cores[1]-1)
+registerDoParallel(cores = all_cores)
+```
+
+# Screening de Múltiplos Modelos para Previsão de Pontos em Jogadores Ativos de Basquete
+
+**Introdução:**
+
+A análise preditiva desempenha um papel fundamental no esporte moderno, permitindo que as equipes e os jogadores tomem decisões estratégicas informadas. No contexto do basquete, prever com precisão a pontuação (PTS) de um jogador durante um jogo pode influenciar diretamente as táticas de jogo, as estratégias defensivas e as substituições táticas. Para obter previsões confiáveis, uma ampla gama de modelos de aprendizado de máquina pode ser explorada. No entanto, essa exploração requer uma avaliação meticulosa de diversos modelos em diferentes cenários, a fim de determinar qual abordagem oferece o melhor desempenho para jogadores ativos.
+
+Neste relatório, embarcamos em um processo de "Teste de Múltiplos Modelos" com o objetivo de identificar o modelo mais adequado para prever a pontuação de jogadores de basquete ativos. Nosso foco principal está na avaliação e comparação dos modelos Cubist e Random Forest, com base nas métricas de R-squared (RSQ) e Erro Quadrático Médio (RMSE). A análise abrangente de diferentes modelos e a seleção do melhor modelo para cada jogador podem fornecer insights valiosos para otimizar as previsões futuras e a tomada de decisões estratégicas.
+
+Ao longo deste arquivo, abordaremos os seguintes pontos-chave:
+
+1.  **Pré-processamento e Exploração dos Dados:** Iniciamos nossa análise com a seleção de jogadores ativos de basquete e exploramos a estrutura dos dados. Realizamos um pré-processamento para remover variáveis irrelevantes e identificar possíveis correlações entre as variáveis relevantes.
+
+2.  **Definição dos Modelos:** Introduzimos os modelos que servirão como candidatos para a previsão de pontos dos jogadores.
+
+3.  **Avaliação dos Modelos:** Implementamos uma abordagem sistemática para avaliar a performance dos modelos. Utilizamos técnicas de validação cruzada e métricas de avaliação, como RSQ e RMSE, para medir o quão bem cada modelo se ajusta aos dados.
+
+4.  **Comparação de Modelos:** Comparamos os resultados obtidos para cada modelo, tanto em termos de métricas de avaliação quanto visualmente por meio de gráficos. Essa comparação nos permite identificar padrões de desempenho e determinar qual modelo apresenta um desempenho superior para diferentes jogadores.
+
+5.  **Seleção do Melhor Modelo:** Com base nas métricas e análises, escolhemos o melhor modelo para cada jogador. Isso nos ajudará a determinar se um modelo específico, se comporta consistentemente melhor em comparação com o outro.
+
+6.  **Considerações Futuras:** Concluiremos o arquivo com considerações sobre possíveis direções futuras. Discutimos como a análise pode ser aprimorada, quais aspectos podem ser explorados mais profundamente e como a escolha do modelo pode ser refinada.
+
+No próximo capítulo, vamos mergulhar no processo de pré-processamento e exploração dos dados, a fim de preparar nosso cenário para a avaliação comparativa dos modelos.
+
+```{r LoadingData}
+
+# Ler os dados
+df <- read_csv("data/wtp.csv", show_col_types = FALSE)
+
+# Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK
+df <- df[, -c(23:34)]
+
+df
+
+
+```
+```{r PreProc}
+# Adicionar uma coluna "active" e preencher com True para jogadores que jogaram em 2022
+df <- df %>%
+  mutate(active = ifelse(season == 2022, TRUE, FALSE))
+
+# Agrupar por jogador e calcular o total de jogos e o total de jogos em 2022
+players_summary <- df %>%
+  group_by(Name) %>%
+  summarize(total_games = n(),
+            games_2022 = sum(active))
+
+# Filtrar jogadores com pelo menos 100 jogos no total e jogaram em 2022
+players_with_500_games <- players_summary %>%
+  filter(total_games >= 500, games_2022 > 0)
+
+# Lista de jogadores que atendem aos critérios
+selected_players <- players_with_500_games$Name
+print(selected_players)
+
+```
+
+Agora que já temos os jogadores ativos com mais de 500 jogos totais vamos prosseguir para os modelos, com isso, eliminamos os jogadores com poucos jogos que não vão produzir modelos confiáveis e com alta chance de overfitting.
+
+```{r Def}
+set.seed(123)
+
+# Inicializar um dataframe para os resultados
+results_df <- data.frame(Player = character(0), Model = character(0), metric = character(0), value = numeric(0), config = character(0), rank = numeric(0))
+
+# Definição dos modelos
+
+linear_reg_spec <-
+ linear_reg(penalty = tune(), mixture = tune()) %>%
+ set_engine("glmnet")
+
+nnet_spec <-
+ mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+ set_engine("nnet", MaxNWts = 2600) %>%
+ set_mode("regression")
+
+mars_spec <-
+ mars(prod_degree = tune()) %>% #<- use GCV to choose terms
+ set_engine("earth") %>%
+ set_mode("regression")
+
+svm_r_spec <-
+ svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+svm_p_spec <-
+ svm_poly(cost = tune(), degree = tune()) %>%
+ set_engine("kernlab") %>%
+ set_mode("regression")
+
+knn_spec <-
+ nearest_neighbor(neighbors = tune(), dist_power = tune(), weight_func = tune()) %>%
+ set_engine("kknn") %>%
+ set_mode("regression")
+
+cart_spec <-
+ decision_tree(cost_complexity = tune(), min_n = tune()) %>%
+ set_engine("rpart") %>%
+ set_mode("regression")
+
+rf_spec <-
+ rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+ set_engine("ranger") %>%
+ set_mode("regression")
+
+cubist_spec <-
+ cubist_rules(committees = tune(), neighbors = tune()) %>%
+ set_engine("Cubist")
+
+nnet_param <-
+ nnet_spec %>%
+ extract_parameter_set_dials() %>%
+ recipes::update(hidden_units = hidden_units(c(1, 27)))
+
+```
+
+```{r Aval}
+
+# Loop para cada jogador na lista
+for (jogador in selected_players) {
+  
+  player_df <- df[df$Name == jogador, ]
+  player_df$home <- NULL
+  player_df$Name <- NULL
+  player_df$team <- NULL
+  player_df$active <- NULL
+  player_df$total_games <-  NULL
+  player_df$games_2022 <- NULL
+  
+  player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+  player_df_train <- training(player_df_split)
+  player_folds <- vfold_cv(player_df_train, v = 10, repeats = 5)
+  
+  # Definição das receitas
+  new_rec <-
+    recipe(PTS ~ ., data = player_df_train) %>%
+    step_dummy(all_nominal_predictors())  %>%
+    step_zv(all_predictors()) 
+  
+  new_normalized_rec <- new_rec %>%
+    step_normalize(all_numeric_predictors()) 
+  
+  normalized <-
+   workflow_set(
+   preproc = list(simple = new_rec),
+   models = list(SVM_radial = svm_r_spec, SVM_poly = svm_p_spec,
+   KNN = knn_spec, neural_network = nnet_spec)
+   )
+  
+  normalized <-
+   normalized %>%
+   option_add(param_info = nnet_param, id = "simple_neural_network")
+  
+  model_vars <-
+   workflow_variables(outcomes = PTS,
+   predictors = everything())
+  
+  # Definindo workflows
+  no_pre_proc <-
+   workflow_set(
+   preproc = list(simple = model_vars),
+   models = list(MARS = mars_spec,
+   CART = cart_spec,
+   RF = rf_spec,
+   Cubist = cubist_spec)
+   )
+  
+  with_features <-
+   workflow_set(
+   preproc = list(norm = new_normalized_rec),
+   models = list(linear_reg = linear_reg_spec, KNN = knn_spec)
+   )
+  
+  all_workflows <-
+   bind_rows(no_pre_proc, normalized, with_features) %>%
+   # Make the workflow IDs a little more simple:
+   mutate(wflow_id = gsub("(simple_)|(normalized_)", "", wflow_id))
+  
+    # Criando grid control e grid results
+  
+  grid_ctrl <-
+    control_grid(
+      save_pred = TRUE,
+      parallel_over = "everything",
+      save_workflow = TRUE
+    )
+  
+  grid_results <-
+    all_workflows %>%
+    workflow_map(
+      seed = 1503,
+      resamples = player_folds,
+      grid = 25,
+      control = grid_ctrl,
+      verbose = TRUE
+    )
+  
+  num_grid_models <- nrow(collect_metrics(grid_results, summarize = FALSE))
+  
+  # Avaliar resultado dos modelos
+  results_summary <- grid_results %>%
+    rank_results() %>%
+    filter(.metric %in% c("rsq", "rmse")) %>%
+    select(model, .config, metric = .metric, value = mean, rank)
+  
+  # Extrair os resultados e adicionar ao dataframe
+  for (i in 1:nrow(results_summary)) {
+    model_name <- results_summary$model[i]
+    metric <- results_summary$metric[i]
+    value <- results_summary$value[i]
+    config <- results_summary$.config[i]
+    rank <- results_summary$rank[i]
+    
+    # Adicionar uma nova linha para o modelo
+  new_row <- data.frame(Player = jogador, Model = model_name, metric = metric, value = value, config = config, rank = rank)
+  results_df <- rbind(results_df, new_row)
+  }
+  
+  
+}
+
+results_df
+
+
+```
+Agora que os modelos já foram treinados, vamos visualizar os melhores modelos por jogador
+```{r}
+
+# Filtrar os 3 melhores modelos por jogador com base na métrica "rsq"
+top3_models_rsq <- results_df %>%
+  group_by(Player) %>%
+  filter(metric == "rsq") %>%
+  arrange(Player, metric, desc(value)) %>%
+  slice_head(n = 2)
+
+print(top3_models_rsq)
+
+top3_models_rmse <- results_df %>%
+  group_by(Player) %>%
+  filter(metric == "rmse") %>%
+  arrange(Player,  value) %>%
+  slice_head(n = 2)
+
+print(top3_models_rmse)
+```
+Essa tabela dá uma primeira noção de quais modelos estão performando melhor para os jogadores.
+```{r}
+
+rsq_results <- results_df %>%
+  filter(metric == "rsq")
+
+rmse_results <- results_df %>%
+  filter(metric == "rmse")
+
+
+ggplot(rsq_results, aes(x = Player, y = value, color = Model)) +
+  geom_point(size = 3, position = position_jitterdodge()) +
+  labs(title = "Desempenho de RSQ por Jogador e Modelo",
+       x = "Jogador",
+       y = "R-squared (RSQ)",
+       color = "Modelo") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+
+ggplot(rmse_results, aes(x = Player, y = value, color = Model)) +
+  geom_point(size = 3, position = position_jitterdodge()) +
+  labs(title = "Desempenho de RMSE por Jogador e Modelo",
+       x = "Jogador",
+       y = "R-squared (RMSE)",
+       color = "Modelo") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+# Filtrar os resultados apenas para as métricas rmse e rsq
+filtered_results <- results_df %>%
+  filter(metric %in% c("rmse", "rsq"))
+
+# Criar um ranking geral de modelos
+overall_ranking <- filtered_results %>%
+  group_by(Player, Model) %>%
+  summarize(best_rmse = min(value[metric == "rmse"]),
+            best_rsq = max(value[metric == "rsq"])) %>%
+  arrange(Player, best_rsq, best_rmse)
+
+# Visualizar o ranking geral
+overall_ranking
+
+```
+
+```{r}
+# Filtrar os resultados apenas para as métricas rmse e rsq
+filtered_results <- results_df %>%
+  filter(metric %in% c("rmse", "rsq"))
+
+# Criar um ranking geral de modelos
+model_ranking <- filtered_results %>%
+  group_by(Model) %>%
+  summarize(mean_rmse = mean(value[metric == "rmse"]),
+            mean_rsq = mean(value[metric == "rsq"])) %>%
+  arrange(mean_rsq, mean_rmse)
+
+# Visualizar o ranking geral de modelos
+print(model_ranking)
+```
+## Análise dos Modelos
+
+A análise a seguir apresenta uma avaliação dos modelos com base nas métricas "mean_rmse" (Erro Quadrático Médio Médio) e "mean_rsq" (Coeficiente de Determinação Médio). Essas métricas fornecem insights importantes sobre o desempenho dos modelos na previsão dos pontos dos jogadores de basquete.
+
+1. **Nearest Neighbor:**
+   - Média RMSE: 6.93
+   - Média RSQ: 0.10
+   O modelo Nearest Neighbor apresenta um desempenho moderado com uma média RMSE relativamente alta e um RSQ baixo. Isso indica que o modelo tem dificuldade em fazer previsões precisas e explicar a variação nos dados.
+
+2. **SVM Polynomial:**
+   - Média RMSE: 7.99
+   - Média RSQ: 0.13
+   O modelo SVM Polynomial exibe um desempenho semelhante ao Nearest Neighbor, com média RMSE alta e RSQ baixo. Isso sugere que o modelo pode estar subajustando ou tendo dificuldades em capturar a complexidade dos dados.
+
+3. **Decision Tree:**
+   - Média RMSE: 6.93
+   - Média RSQ: 0.17
+   O modelo Decision Tree apresenta um desempenho intermediário, com média RMSE relativamente alta, mas um RSQ um pouco melhor. Isso indica que o modelo pode estar tendendo ao overfitting, capturando muito bem os detalhes dos dados de treinamento, mas com desempenho inferior em dados não vistos.
+
+4. **SVM Radial Basis Function (RBF):**
+   - Média RMSE: 6.68
+   - Média RSQ: 0.17
+   O modelo SVM RBF mostra resultados semelhantes ao Decision Tree, com média RMSE razoavelmente alta e um RSQ moderado. Isso sugere que o modelo pode estar se esforçando para generalizar as previsões.
+
+5. **Cubist Rules:**
+   - Média RMSE: 6.37
+   - Média RSQ: 0.24
+   O modelo Cubist Rules demonstra um desempenho promissor, com média RMSE e RSQ melhores em comparação com os modelos anteriores. Isso indica que o modelo pode ser capaz de capturar relações não lineares nos dados.
+
+6. **MARS (Multivariate Adaptive Regression Splines):**
+   - Média RMSE: 6.40
+   - Média RSQ: 0.24
+   O modelo MARS também apresenta um desempenho similar ao Cubist Rules, com média RMSE e RSQ relativamente altos. Isso sugere que o modelo MARS pode estar conseguindo capturar as relações complexas nos dados.
+
+7. **Linear Regression:**
+   - Média RMSE: 5.91
+   - Média RSQ: 0.27
+   O modelo de Regressão Linear destaca-se com média RMSE mais baixa e RSQ mais alto em comparação com os modelos anteriores. Isso indica que o modelo linear está ajustando-se bem aos dados, embora possa estar limitado a relações lineares.
+
+8. **Random Forest:**
+   - Média RMSE: 5.79
+   - Média RSQ: 0.28
+   O modelo Random Forest apresenta um dos melhores desempenhos, com média RMSE e RSQ mais baixos entre os modelos avaliados. Isso sugere que o modelo está fazendo previsões precisas e consegue explicar uma boa parte da variação nos dados.
+
+9. **MLP (Multilayer Perceptron):**
+   - Média RMSE: 6.92
+   - Média RSQ: NaN
+   O modelo MLP exibe uma média RMSE semelhante ao Nearest Neighbor, mas o valor NaN no RSQ indica que o modelo pode ter dificuldades em quantificar a variação explicada nos dados.
+
+Em geral, o modelo Random Forest apresenta os melhores resultados médios em ambas as métricas, indicando que ele tem um desempenho mais robusto na previsão dos pontos dos jogadores. A Regressão Linear também se destaca, sugerindo que uma abordagem mais simples pode ser eficaz para esse conjunto de dados. No entanto, é importante considerar outros fatores, como interpretabilidade, escalabilidade e recursos computacionais, ao escolher um modelo para implementações futuras.
+
+```{r}
+# Salvar o dataframe selected_players em um arquivo CSV
+write.csv(selected_players, "data/selected_players.csv", row.names = FALSE)
+```
+
+## Considerações Futuras:
+
+Concluímos este arquivo com reflexões sobre as possíveis direções que podem ser exploradas em trabalhos futuros. Durante a análise realizada, identificamos jogadores com 500 ou mais jogos, o que nos permitiu ter uma base robusta para avaliar os modelos de previsão. A próxima etapa será salvar os dados dos jogadores selecionados, garantindo que tenhamos um conjunto sólido para análises futuras.
+
+Neste trabalho, dedicamos atenção especial ao modelo Random Forest (RF), explorando seu desempenho e buscando aprimorá-lo. No entanto, existem várias áreas que podem ser investigadas para refinarmos ainda mais nossas previsões. No próximo arquivo, planejamos nos concentrar nos jogadores que foram treinados com o modelo Random Forest e explorar a influência da quantidade de árvores (trees) no desempenho do modelo. Isso nos permitirá entender se um número específico de árvores resulta em melhorias significativas nas previsões ou se existe um ponto de equilíbrio.
+
+Além disso, pretendemos ir além e identificar os melhores jogadores dentro do contexto do modelo Random Forest. A seleção de um subconjunto de jogadores com base no desempenho do modelo nos permitirá focar em áreas mais promissoras e direcionar nossos esforços para o refinamento do modelo preditivo.
+
+Ao finalizar este arquivo, reforçamos o compromisso de continuarmos aprimorando nossa análise e ajustando nosso modelo para alcançar resultados ainda mais precisos e úteis. As considerações futuras certamente envolvem a exploração de outros modelos, ajustes de hiperparâmetros e a validação cruzada rigorosa para garantir a robustez de nossas conclusões.
+
+Esperamos que este trabalho continue contribuindo para a nossa compreensão dos dados e para a criação de um modelo preditivo confiável e eficaz para as estatísticas dos jogadores de basquete.
+
+*Nota: As considerações futuras são uma parte importante do processo de análise, pois nos permitem delinear os próximos passos e destacar as áreas que podem trazer insights valiosos.*
+

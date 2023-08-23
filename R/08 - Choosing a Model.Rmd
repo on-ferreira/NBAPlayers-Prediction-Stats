@@ -81,8 +81,6 @@ O modelo Random Forest apresentou um RMSE de aproximadamente 6.99 e um R-squared
 
 Por outro lado, o modelo Cubist obteve um RMSE de cerca de 6.54 e um R-squared de 0.52. Isso indica que o Cubist tem um erro de previsão médio de aproximadamente 6.54 unidades e é capaz de explicar cerca de 51.60% da variação nos dados de saída. Esses resultados sugerem um desempenho um pouco melhor em comparação com o Random Forest.
 
-
-
 ```{r}
 set.seed(123)
 
@@ -199,6 +197,7 @@ results_df
 ```
 
 Na primeira vez estou rodando para visualizar quais os melhores modelos para cada jogador, com essa informação pretendo descobrir se realmente o Cubist é o melhor entre os dois modelos, ou se eles vão performar de forma não satisfatória para os outros jogadores.
+
 ```{r}
 
 # Filtrar os 3 melhores modelos por jogador com base na métrica "rsq"
@@ -218,7 +217,6 @@ top3_models_rmse <- results_df %>%
 
 print(top3_models_rmse)
 ```
-
 
 ```{r}
 
@@ -285,7 +283,6 @@ ggplot() +
 #Bola = Random Forest
 
 ```
-
 
 ### Escolhendo o Modelo
 
