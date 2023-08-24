@@ -7,7 +7,9 @@ import chardet
 import datetime
 
 
-SCORE_DIR = "data\\SCORES"
+PROJECT_ROOT = r'C:\Users\orlan\OneDrive\Documentos\UFF\NBAPlayers-Prediction-Stats'
+DATA_DIR = os.path.join(PROJECT_ROOT, 'Python', 'DATA')
+SCORE_DIR = os.path.join(DATA_DIR, 'SCORES')
 
 actual_hour = datetime.datetime.now()
 box_scores = os.listdir(SCORE_DIR)
@@ -121,7 +123,8 @@ for box_score in box_scores:
 finalDF = pd.concat([df.reset_index(drop=True) for df in dataframes], ignore_index=True)
 finalDF = finalDF.rename(columns={"Starters": "Name"})
 
-finalDF.to_csv("data\\DFwithHourandLocation.csv", index=False)
+file_path = os.path.join(DATA_DIR, '2023-DF.csv')
+finalDF.to_csv(file_path, index=False)
 
 actual_hour2 = datetime.datetime.now()
 diff = actual_hour2 - actual_hour

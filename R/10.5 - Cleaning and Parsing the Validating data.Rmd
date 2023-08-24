@@ -1,0 +1,257 @@
+---
+title: "10.5 - Cleaning and Parsing the Validating data"
+output: html_document
+date: "2023-08-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(purrr)
+library(lubridate)
+library(readr)
+```
+
+## Preparação de Dados para Validação do Modelo de Previsão de Basquete - Temporada 2023
+
+### Introdução:
+Neste documento, vou detalhar o processo de preparação dos dados da temporada de basquete de 2023 para realizar a validação do modelo de previsão. A ideia é ajustar os dados coletados ao padrão dos dados usados no treinamento do modelo, garantindo assim uma avaliação precisa da eficácia do modelo em cenários do mundo real.
+
+### Passo 1: Coleta e Avaliação Inicial dos Dados
+Começarei coletando os dados brutos da temporada de basquete de 2023. Preciso entender a estrutura dos dados, incluindo as variáveis presentes, os tipos de dados e possíveis problemas, como valores faltantes ou erros.
+
+### Passo 2: Correspondência de Variáveis
+Vou comparar as variáveis nos dados brutos de 2023 com as variáveis usadas para treinar o modelo. É importante garantir que as colunas e os tipos de dados sejam os mesmos para manter a consistência durante a validação.
+
+### Passo 3: Tratamento de Dados Ausentes
+Lidarei com valores ausentes, optando por remover as linhas, pois isso indica que o jogador não jogou naquela partida e com isso manterei a qualidade da variável dias de descanso.
+
+### Passo 4: Engenharia de Recursos
+Se o modelo original utilizou variáveis derivadas, aplicarei as mesmas técnicas aos dados de 2023. Isso assegura que as informações relevantes estejam disponíveis para o modelo durante a validação.
+
+### Passo 5: Avaliação da Qualidade dos Dados
+Após a preparação, vou avaliar a qualidade dos dados resultantes. A meta é ter um conjunto livre de erros e que se ajuste ao padrão dos dados de treinamento.
+
+### Passo 6: Avaliação do Modelo
+Os dados preparados da temporada de 2023 serão usados como conjunto de validação para o modelo. Realizarei previsões usando o modelo treinado e compararei essas previsões com os valores reais da temporada de 2023. Isso permitirá avaliar a capacidade do modelo em fazer previsões precisas em um contexto mais atual.
+
+### Conclusão
+A preparação dos dados é fundamental para validar o modelo de previsão. Ao ajustar os dados da temporada de 2023 ao padrão dos dados de treinamento, estou criando um ambiente realista para avaliar o desempenho do modelo. O processo vai revelar insights sobre a eficácia do modelo e possíveis melhorias, orientando decisões futuras sobre sua implementação.
+
+```{r Cleaner}
+
+df <- read_csv("data/2023-DF.csv")  
+df$'Unnamed: 16' <- NULL
+df$date <- as.Date(df$date)
+
+# Trim spaces and replace with underscores in 'Name' column
+df$Name <- gsub(" ", "_", trimws(df$Name))
+
+#Removing rows where the MP =0 or MP = NA
+df <- subset(df, !is.na(MP) & MP != 0)
+
+
+#Corrigindo os nomes que temos conhecimento de serem problemáticos
+
+fix_player_names <- function(data) {
+  name_mapping <- c(
+    "mirza_teletović" = "mirza_teletovic",
+    "mirza_teletovi?" = "mirza_teletovic",
+    "boban_marjanović" = "boban_marjanovic",
+    "boban_marjanovi?" = "boban_marjanovic",
+    "bojan_bogdanović" = "bojan_bogdanovic",
+    "bojan_bogdanovi?" = "bojan_bogdanovic",
+    "goran_dragić" = "goran_dragic",
+    "goran_dragi?" = "goran_dragic",
+    "jusuf_nurkić" = "jusuf_nurkic",
+    "jusuf_nurki?" = "jusuf_nurkic",
+    "nikola_jokić" = "nikola_jokic",
+    "nikola_joki?" = "nikola_jokic",
+    "dario_šarić" = "dario_saric",
+    "dario_šari?" = "dario_saric",
+    "dario_교ri?" = "dario_saric",
+    "miloš_teodosi?" = "milos_teodosic",
+    "miloš_teodosić" = "milos_teodosic",
+    "ante_žiži?" = "ante_zizic",
+    "ante_žižić" = "ante_zizic",
+    "bogdan_bogdanovi?" = "bogdan_bogdanovic",
+    "bogdan_bogdanović" = "bogdan_bogdanovic",
+    "nikola_mirotić" = "nikola_mirotic",
+    "nikola_miroti?" = "nikola_mirotic",
+    "donatas_motiej?nas" = "donatas_motiejunas",
+    "donatas_motiejūnas" = "donatas_motiejunas",
+    "ersan_i̇lyasova" = "ersan_ilyasova",
+    "ersan_?lyasova" = "ersan_ilyasova", 
+    "nikola_vučević" = "nikola_vucevic",
+    "nikola_vu?evi?" = "nikola_vucevic",
+    "jonas_valančiūnas" = "jonas_valanciunas",
+    "jonas_valan?i?nas" = "jonas_valanciunas",
+    "dāvis_bertāns" = "davis_bertans",
+    "d?vis_bert?ns" = "davis_bertans",
+    "dairis_bert?ns" = "davis_bertans",
+    "kristaps_porziņģis" = "kristaps_porzingis",
+    "kristaps_porzi??is" = "kristaps_porzingis",
+    "dairis_bert?ns" = "dairis_bertans",
+    "damjan_rudež" = "damjan_rudez",
+    "sasha_vujačić" = "sasha_vujacic",
+    "nikola_peković" = "nikola_pekovic",
+    "tomáš_satoranský" = "tomas,satoransky",
+    "luka_don?i?" = "luka_doncic",
+    "džanan_musa" = "dzanan_musa",
+    "vlatko_?an?ar" = "vlatko_cancar",
+    "anžejs_pase??iks" = "anzejs_pasecnkis",
+    "alen_smailagi?" = "alen_smailagic",
+    "luka_šamani?" = "luka_samanic",
+    "alperen_?engün" = "alperen_sengun",
+    "dennis_schr漆e" = "dennis_schroder",
+    "dennis_schröder" = "dennis_schroder",
+    "dennis_schr漆er" = "dennis_schroder",
+    "d료nan_musa" = "dzanan_musa",
+    "dennis_schr漆er" = "dennis_schroder"
+  )
+  
+  data$Name <- ifelse(data$Name %in% names(name_mapping), name_mapping[data$Name], data$Name)
+  
+  return(data)
+}
+
+# Call the fix_player_names() function to fix the names in the "data" data frame
+df <- fix_player_names(df)
+
+# Fill NA values with 0 in the specified columns
+df$PF <- replace(df$PF, is.na(df$PF), 0)
+
+# Remove duplicate rows
+df <- distinct(df)
+
+# Extract the year and month from the date column
+df <- df %>%
+  mutate(year = lubridate::year(date),
+         month = lubridate::month(date),
+         day = lubridate::day(date))
+
+# Find the unique combinations of season and year to determine the season start months
+season_start_dates <- df %>%
+  distinct(season, year, month)
+
+season_start_dates$season_month <- 1
+
+# Initialize the counter for season and month
+current_season <- season_start_dates$season[1] #2016
+current_season_month <- 1
+
+# Loop through each row in the dataframe
+for (i in 1:nrow(season_start_dates)) {
+  # Check if the season and month have changed
+  if (season_start_dates$season[i] != current_season) {
+    current_season_month <- 1
+    current_season <- season_start_dates$season[i]
+    current_season_month <- current_season_month + 1
+  }
+  else{
+    season_start_dates$season_month[i] <- current_season_month
+    current_season_month <- current_season_month + 1
+  }
+}
+
+# Join season_start_dates with df
+df <- df %>%
+  left_join(season_start_dates, by = c("season", "year","month"))
+
+
+#The hour column will be converted to numeric representation
+df <- df %>% mutate(hour_float = as.numeric(hour) / 3600)
+df$hour <- NULL
+
+calculate_rest_days <- function(data) {
+  data <- data %>% 
+    group_by(Name) %>%
+    mutate(rest_days = c(0, diff(date))) %>%
+    mutate(rest_days = ifelse(rest_days > 30, 0, rest_days))
+  
+  
+  return(data)
+}
+
+df <- calculate_rest_days(df)
+
+columns_to_be_removed <- c("+/-", "TS%", "eFG%", "3PAr", "FTr", "ORB%", "DRB%", "TRB%", "AST%", "STL%", "BLK%", "TOV%", "USG%", "ORtg", "DRtg", "BPM", "date", "location", "year", "month", "day", "FG%", "3P%", "FT%")
+
+df <- df[, !(names(df) %in% columns_to_be_removed)]
+
+# Convert "opp" column to factor for grouping
+df$opp <- as.factor(df$opp)
+
+df
+write.csv(df, file = "data/2023-DF-preWTP.csv", row.names = FALSE)
+
+
+```
+
+Agora eu vou salvar esses dados e adicionar eles manualmente no final do csv antigo que contem os dados das outras temporadas.
+
+```{r}
+df <- read_csv("data/DF-with-2023.csv")  
+
+calculate_median <- function(x) {
+  if (length(x) == 1) {
+    return(0)
+  } else {
+    return(median(x[-length(x)], na.rm = TRUE))
+  }
+}
+
+
+# Function to calculate the rolling median for a given column
+calculate_rolling_median <- function(data, column, n) {
+  data <- data %>% group_by(Name)
+  
+  column_name <- paste0("L", n, "_", column)
+  
+  # Apply the function to calculate the rolling median using a window of size 10
+  data <- data %>%
+    mutate("{column_name}" := rollapply(.data[[column]], width = (n+1), FUN = calculate_median,
+                                  fill = NA, align = "right", partial = TRUE)) %>%
+    ungroup()
+  
+  # Group the data by player name and opponent
+  data <- data %>% group_by(Name, opp)
+  
+  n_opp <- floor(n/2)
+  
+  column_name_opp <- paste0("L", n_opp, "_", column,"_opp")
+
+  # Apply the function to calculate the median using rolling window of size 10 per opponent
+  data <- data %>%
+    mutate("{column_name_opp}" := rollapply(.data[[column]], width = (n_opp+1), FUN = calculate_median, fill = NA, align = "right",partial=TRUE))
+
+  data <- data %>% ungroup()
+  
+  
+  return(data)
+}
+
+columns_to_watch <- c("FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF", "PTS")
+
+for (column in columns_to_watch) {
+  print(column)
+  df <- calculate_rolling_median(df, column, 10)
+}
+
+
+df$ppm <- df$PTS / df$MP
+
+df <- calculate_rolling_median(df, "ppm", 10)
+
+columns_to_remove <- c("FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB", "TRB", "AST", "STL", "BLK", "TOV", "PF", "ppm")
+
+df <- df[, -which(names(df) %in% columns_to_remove)]
+
+# Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK
+df <- df[, -c(23:34)]
+df
+write.csv(df, file = "data/wtp-with-2023.csv", row.names = FALSE)
+```
+
+
+

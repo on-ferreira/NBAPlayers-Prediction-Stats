@@ -6,11 +6,149 @@ date: "2023-08-24"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(purrr)
+library(readr)
+library(tidymodels)
+tidymodels_prefer()
+library(conflicted)
+library(ggrepel)
+library(corrr)
+library(ggplot2)
+library(Metrics)
 ```
 
 
 ```{r}
 # Carregar a lista player_models de volta a partir do arquivo RDS
 loaded_player_models <- readRDS("data/player_models.rds")
+
+#Carregar o df com os dados
+df <- read_csv("data/wtp-with-2023.csv", show_col_types = FALSE)
+
+#Inicializando uma data frame vazio para armazenar os resultados das métricas da validação
+metrics_df <- data.frame(Player = character(0), 
+                         predictions = I(list()), 
+                         mse = numeric(0), 
+                         rmse = numeric(0), 
+                         rsq = numeric(0), 
+                         stringsAsFactors = FALSE)
+
+predictions_df <- data.frame(Name = character(0), predictions = I(list()), stringsAsFactors = FALSE)
+
+
 ```
 
+Como a nossa análise foi feita com os jogadores ainda ativos em 2022, pode exister [e existe] o caso onde o jogador não tenha sido ativo em 2023. Portanto preciso verificar se é o caso e remover o jogador em questão da lista.
+
+```{r}
+still_active <- tibble(Player = character())
+
+for (i in seq_along(loaded_player_models)) {
+  player <- loaded_player_models[[i]]
+  player_name <- names(loaded_player_models)[i]
+  print(paste("Player:", player_name))
+
+  player_entries <- df %>%
+    filter(Name == player_name & season == 2023)
+  
+  new_data <- player_entries[, -which(names(player_entries) %in% c( "Name"))]
+  num_entries <- nrow(player_entries)
+  print(paste("Number of entries for", player_name, ":", num_entries))
+
+  if (num_entries > 0) {
+    still_active <- still_active %>%
+      add_row(Player = player_name)
+  }
+  
+}
+
+still_active
+
+```
+
+
+
+```{r}
+for (player in still_active$Player) {
+  player_model <- loaded_player_models[[player]]
+  trained_workflow <- player_model$rf_test_results$.workflow[[1]]
+
+  player_entries <- df %>%
+    filter(Name == player & season == 2023)
+  
+  new_data <- player_entries[, -which(names(player_entries) %in% c( "Name"))]
+  
+  # Fazer previsões usando o modelo do workflow
+  predictions <- trained_workflow %>% 
+    augment(new_data = new_data)  
+  
+  mse <- mse(predictions$PTS, predictions$.pred)
+  mae <- yardstick::mae(predictions, PTS, .pred)
+  rsquared <- rsq(predictions, PTS, .pred)
+  
+  linha <- data.frame(Player = player, 
+            mse = mse, 
+            rmse = mae$.estimate, 
+            rsq = rsquared$.estimate)
+  
+  pred_linha <- data.frame(Name = player, predictions = predictions)
+
+  # Adicionar os resultados a tibble metrics_df
+  metrics_df <- rbind(metrics_df, linha)
+  
+  #Adicionar as predições a tibble metrics_df
+  predictions_df <- rbind(predictions_df, pred_linha)
+  
+}
+metrics_df
+```
+
+```{r}
+predictions_df
+```
+
+
+```{r}
+for (player in still_active$Player) {
+  player_name <- player
+  
+  player_predictions <- predictions_df %>%
+    filter(Name == player_name)
+  
+  # Gráfico de Dispersão
+  scatter_plot <- ggplot(player_predictions, aes(x = predictions.PTS, y = predictions..pred)) +
+    geom_point() +
+    geom_smooth(method = "lm", color = "blue") +
+    labs(x = "PTS (Valores Reais)", y = ".pred (Previsões)",
+         title = paste("Relação entre Valores Reais e Previsões para", player_name))
+  
+  # Adicionar coluna de resíduos ao player_predictions
+  player_predictions$residuals <- player_predictions$predictions.PTS - player_predictions$predictions..pred
+  
+  # Gráfico de Resíduos
+  residuals_plot <- ggplot(player_predictions, aes(x = predictions.PTS, y = residuals)) +
+    geom_point() +
+    geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+    labs(x = "PTS (Valores Reais)", y = "Resíduos (Diferença entre PTS e .pred)",
+         title = paste("Gráfico de Resíduos para", player_name))
+  
+  # Salvar os gráficos como arquivos PNG
+  ggsave(filename = paste("graphs/",player_name, "_scatter_plot.png", sep = ""), plot = scatter_plot)
+  ggsave(filename = paste("graphs/",player_name, "_residuals_plot.png", sep = ""), plot = residuals_plot)
+}
+```
+Ao comparar os valores de R-squared dos modelos usando os dados de treino/teste, podemos observar que, para a maioria dos jogadores, o valor de R-squared nos dados novos é menor do que nos dados de treino e teste. Isso indica que os modelos podem ter apresentado overfitting, ou seja, eles podem ter se ajustado muito bem aos dados de treino e teste, mas não generalizaram tão bem para novos dados.
+
+A análise dos resíduos das previsões revelou padrões interessantes em relação à distribuição dos erros das previsões para a maioria dos jogadores. No geral, a maioria dos jogadores apresentou uma distribuição equilibrada de resíduos positivos e negativos, indicando que as previsões estavam se aproximando tanto abaixo quanto acima dos valores reais de pontos (PTS).
+
+Entretanto, dois jogadores em particular se destacaram por padrões diferentes. No caso de Kelly Olynyk, observou-se que a maioria dos resíduos das previsões estava inclinada para valores negativos, ou seja, as previsões estavam subestimando os valores reais de pontos. Isso pode sugerir que o modelo talvez não esteja capturando completamente os fatores que influenciam o desempenho de Kelly Olynyk em 2023.
+
+Por outro lado, para o jogador terry_rozier, notou-se que a maioria dos resíduos estava inclinada para valores positivos, indicando que as previsões estavam tendendo a superestimar os valores reais de pontos. Isso pode sugerir que o modelo pode estar sendo otimista em relação ao desempenho de terry_rozier, possivelmente devido a características específicas do jogador ou a outros fatores não considerados pelo modelo.
+
+Observando a tabela, podemos notar algumas diferenças nos desempenhos dos jogadores em relação às métricas. Por exemplo, o jogador "javale_mcgee" obteve o menor valor de MSE, indicando que suas previsões apresentaram o menor erro médio quadrático. Além disso, ele também possui o maior valor de R-squared, sugerindo que seu modelo de previsão se ajusta bem aos dados reais.
+
+Por outro lado, "nikola_jokic" teve um MSE e MAE relativamente maiores, indicando que suas previsões tiveram erros médios maiores em comparação com outros jogadores. No entanto, seu valor de R-squared também é alto, sugerindo um bom ajuste das previsões ao conjunto de dados real.
+
+Em geral, essa análise das métricas fornece insights valiosos sobre a qualidade das previsões de pontos para cada jogador de basquete. Valores menores de MSE e MAE, juntamente com valores mais altos de R-squared, indicam um desempenho melhor nas previsões. Isso pode ser útil para avaliar a confiabilidade das previsões e identificar áreas que podem necessitar de ajustes nos modelos de previsão.

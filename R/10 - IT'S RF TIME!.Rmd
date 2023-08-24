@@ -88,7 +88,7 @@ rf_spec <-
 ```
 
 
-```{r}
+```{r, eval=FALSE}
 # Loop para cada jogador na lista
 for (jogador in players_df$x) {
   
