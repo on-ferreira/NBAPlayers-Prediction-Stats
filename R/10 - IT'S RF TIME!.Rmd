@@ -1,29 +1,351 @@
 ---
-title: "10 - IT'S RF TIME!"
+title: "IT'S RF TIME!"
 output: html_document
 date: "2023-08-23"
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(purrr)
+library(readr)
+library(tidymodels)
+tidymodels_prefer()
+library(recipes)
+library(conflicted)
+library(usemodels)
+library(ggrepel)
+library(corrr)
+library(tidyposterior)
+library(rstanarm)
+library(baguette)
+library(ranger)
+library(rules)
+library(ggplot2)
+
+# speed up computation with parrallel processing (optional)
+library(doParallel)
+all_cores <- parallel::detectCores(logical = FALSE)
+#Create cluster with desired number of cores, leave one open for the machine         
+#core processes
+cl <- makeCluster(all_cores[1]-1)
+registerDoParallel(cores = all_cores)
 ```
 
-## R Markdown
+# Análise de Modelos Random Forest: Refinando os Parametros e a Seleção de Jogadores
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Neste próximo arquivo, continuaremos nossa análise de modelos de previsão de pontos de jogadores de basquete, com foco especial no modelo Random Forest (RF). Com base nas conclusões e direções futuras delineadas no arquivo anterior, exploraremos como a quantidade de árvores (trees) afeta o desempenho do modelo RF.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+## Objetivo
 
-```{r cars}
-summary(cars)
+O principal objetivo deste arquivo é investigar como a variação no número de árvores em nosso modelo Random Forest influencia as métricas de avaliação, como RMSE e R-squared. Dedicaremos atenção ao balanceamento entre desempenho e complexidade do modelo, buscando encontrar um número ideal de árvores que resulte em previsões mais precisas e estáveis.
+
+## Metodologia
+
+Utilizaremos a base de jogadores selecionados com mais de 500 jogos, conforme abordado no arquivo anterior. Através de testes sistemáticos, exploraremos diferentes quantidades de árvores no modelo Random Forest e avaliaremos o impacto nas métricas de desempenho. Compararemos as previsões geradas por diferentes configurações de árvores para determinar a relação entre a complexidade do modelo e sua eficácia preditiva.
+
+## Próximos Passos
+
+Após a análise da quantidade de árvores no modelo Random Forest, nossa próxima etapa será a identificação dos jogadores que obtiveram os melhores resultados dentro dessa configuração. Com isso, estaremos prontos para finalizar nosso modelo preditivo, visando previsões mais precisas e robustas.
+
+Continue conosco nesta jornada de análise de dados e modelagem preditiva, conforme refinamos nossos métodos e aprimoramos nossos resultados.
+
+*Nota: Esta análise é uma continuação direta do trabalho anterior e busca responder às perguntas levantadas nas considerações futuras.*
+
+
+```{r LoadingData}
+# Ler os dados
+df <- read_csv("data/wtp.csv", show_col_types = FALSE)
+
+# Remover colunas relacionadas a ORB, DRB, TRB, AST, STL, BLK
+df <- df[, -c(23:34)]
+
+df
+
+# Ler os dados
+players_df <- read_csv("data/selected_players.csv", show_col_types = FALSE)
+players_df
+
+
 ```
 
-## Including Plots
+Como os custos para o treinamento do modelo de RandomForest são pequenos, vamos repetir os treinamentos feitos anteriormente e focar nos seus resultados.
 
-You can also embed plots, for example:
+```{r}
+set.seed(123)
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+# Inicializar um dataframe para os resultados
+results_df <- data.frame(Player = character(0), Model = character(0), metric = character(0), value = numeric(0), config = character(0), rank = numeric(0))
+  
+  
+# Definição do modelo
+rf_spec <-
+ rand_forest(mtry = tune(), min_n = tune(), trees = tune()) %>%
+ set_engine("ranger") %>%
+ set_mode("regression")
+
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+# Loop para cada jogador na lista
+for (jogador in players_df$x) {
+  
+  player_df <- df[df$Name == jogador, ]
+  player_df$home <- NULL
+  player_df$Name <- NULL
+  if (length(unique(player_df$team)) == 1) {
+   player_df$team <- NULL
+  }
+
+  
+  player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+  player_df_train <- training(player_df_split)
+  player_folds <- vfold_cv(player_df_train, v = 10, repeats = 5)
+  
+  # Definição das receitas
+  new_rec <-
+    recipe(PTS ~ ., data = player_df_train) %>%
+    step_dummy(all_nominal_predictors())  %>%
+    step_zv(all_predictors()) 
+  
+  
+  new_normalized_rec <- new_rec %>%
+    step_normalize(all_numeric_predictors()) 
+  
+  model_vars <-
+   workflow_variables(outcomes = PTS,
+   predictors = everything())
+  
+  # Definindo workflows
+  no_pre_proc <- workflow_set(
+    preproc = list(simple = model_vars),
+    models = list(RF = rf_spec)
+  )
+  
+  with_features <- workflow_set(
+    preproc = list(norm = new_normalized_rec),
+    models = list(
+      RF = rf_spec
+    )
+  )
+
+  all_workflows <-
+   bind_rows(no_pre_proc, with_features)
+  
+  # Criando grid control e grid results
+  
+  grid_ctrl <-
+    control_grid(
+      save_pred = TRUE,
+      parallel_over = "everything",
+      save_workflow = TRUE
+    )
+  
+  grid_results <-
+    all_workflows %>%
+    workflow_map(
+      seed = 1503,
+      resamples = player_folds,
+      grid = 25,
+      control = grid_ctrl,
+      verbose = TRUE
+    )
+  
+  num_grid_models <- nrow(collect_metrics(grid_results, summarize = FALSE))
+  
+  # Avaliar resultado dos modelos
+  results_summary <- grid_results %>%
+    rank_results() %>%
+    filter(.metric %in% c("rsq", "rmse")) %>%
+    select(model, .config, metric = .metric, value = mean, rank)
+  
+  # Extrair os resultados e adicionar ao dataframe
+  for (i in 1:nrow(results_summary)) {
+    model_name <- results_summary$model[i]
+    metric <- results_summary$metric[i]
+    value <- results_summary$value[i]
+    config <- results_summary$.config[i]
+    rank <- results_summary$rank[i]
+    
+    # Adicionar uma nova linha para o modelo
+    new_row <- data.frame(Player = jogador, Model = model_name, metric = metric, value = value, config = config, rank = rank)
+    results_df <- rbind(results_df, new_row)
+  }
+  
+
+}
+
+results_df
+```
+
+
+```{r}
+
+# Ordenar os resultados pelo maior RSQ
+sorted_results <- results_df %>%
+  filter(metric == "rsq") %>%  # Filtrar apenas as linhas com métrica RSQ
+  arrange(desc(value), rank)    # Ordenar pelo maior valor de RSQ e classificação
+
+# Selecionar os jogadores com maior RSQ
+best_players <- sorted_results %>%
+  group_by(Player) %>%
+  filter(row_number() == 1)
+
+# Exibir os melhores jogadores
+print(best_players)
+
+
+```
+
+O R-squared (RSQ), também conhecido como coeficiente de determinação, é uma métrica frequentemente utilizada para avaliar a qualidade de um modelo de regressão, incluindo modelos de previsão. Ele é especialmente útil em situações onde queremos entender como bem o modelo se ajusta aos dados e explica a variação na variável de resposta.
+
+Quando se trata de avaliar modelos de previsão para jogadores de basquete, o R-squared se mostra mais robusto em relação ao Root Mean Squared Error (RMSE) por uma razão importante: a natureza assimétrica da distribuição dos pontos. Muitos jogadores têm uma pontuação baixa, o que levaria a um RMSE mais baixo devido à menor variação em relação a jogadores de pontuação alta.
+
+No entanto, o RMSE não nos dá informações completas sobre a qualidade do ajuste do modelo, uma vez que ele pune mais fortemente os erros maiores. Isso pode levar a um resultado enganoso, especialmente quando o número de jogadores com baixa pontuação é significativamente maior. Por exemplo, um modelo que preveja constantemente uma pontuação média para todos os jogadores (mesmo que errada) teria um RMSE menor, mas seria inútil para prever o desempenho real.
+
+O R-squared, por outro lado, avalia a proporção da variabilidade total na variável de resposta que é explicada pelo modelo. Ele leva em consideração tanto os erros menores quanto os maiores, fornecendo uma visão mais equilibrada do quão bem o modelo se ajusta aos dados. Dessa forma, o R-squared nos ajuda a entender a capacidade do modelo em explicar a variação observada e a realizar previsões mais precisas em um contexto mais amplo.
+
+Em resumo, ao avaliar modelos de previsão para jogadores de basquete, especialmente quando há uma grande variação nas pontuações dos jogadores, o R-squared é uma métrica mais confiável para entender o ajuste do modelo aos dados e sua capacidade de fazer previsões precisas. Isso é especialmente importante para aprimorar as previsões para jogadores com diferentes níveis de desempenho.
+
+```{r}
+#Atualizando o .csv com os 10 jogadores com maior RSQ
+
+sorted_results <- results_df %>%
+  filter(metric == "rsq") %>% 
+  arrange(desc(value)) 
+
+best_players <- sorted_results %>%
+  group_by(Player) %>%
+  filter(row_number() == 1) 
+
+
+# Selecionar as 10 melhores linhas
+top10 <- head(best_players, 10)
+
+
+# Salvar os nomes dos 10 melhores jogadores em um arquivo CSV
+write.csv(top10 %>% select(Player), "data/top10.csv", row.names = FALSE)
+write.csv(top10, "data/top10-with-metrics.csv", row.names = FALSE)
+
+```
+
+Percebo agora que não salvei os resultados do grid_result por completo, apenas as métricas dos modelos treinados. Portanto vou ter que repetir o treinamento com os 10 melhores para salvar essas informações.
+
+```{r}
+
+players_top10_df <- read.csv("data/top10.csv")
+
+# Inicializar lista para armazenar os modelos otimizados
+player_models <- list()
+
+# Loop para cada jogador na lista
+for (jogador in players_top10_df$Player) {
+  
+  player_df <- df[df$Name == jogador, ]
+  player_df$home <- NULL
+  player_df$Name <- NULL
+  if (length(unique(player_df$team)) == 1) {
+   player_df$team <- NULL
+  }
+  
+  player_df_split <- initial_split(player_df, prop = 0.80, strata = season_month)
+  player_df_train <- training(player_df_split)
+  player_folds <- vfold_cv(player_df_train, v = 10, repeats = 5)
+  
+  # Definição das receitas
+  new_rec <-
+    recipe(PTS ~ ., data = player_df_train) %>%
+    step_dummy(all_nominal_predictors())  %>%
+    step_zv(all_predictors()) 
+  
+  new_normalized_rec <- new_rec %>%
+    step_normalize(all_numeric_predictors()) 
+  
+  model_vars <-
+   workflow_variables(outcomes = PTS,
+   predictors = everything())
+  
+  # Definindo workflows
+  no_pre_proc <- workflow_set(
+    preproc = list(simple = model_vars),
+    models = list(RF = rf_spec)
+  )
+  
+
+  all_workflows <-
+   bind_rows(no_pre_proc)
+  
+  # Criando grid control e grid results
+  
+  grid_ctrl <-
+    control_grid(
+      save_pred = TRUE,
+      parallel_over = "everything",
+      save_workflow = TRUE
+    )
+  
+  grid_results <-
+    all_workflows %>%
+    workflow_map(
+      seed = 1503,
+      resamples = player_folds,
+      grid = 25,
+      control = grid_ctrl,
+      verbose = TRUE
+    )
+
+  #Selecionando os dados do melhor modelo
+  best_results <-
+   grid_results %>%
+   extract_workflow_set_result("simple_RF") %>%
+   select_best(metric = "rsq")
+
+
+  rf_test_results <-
+   grid_results %>%
+   extract_workflow("simple_RF") %>%
+   finalize_workflow(best_results) %>%
+   last_fit(split = player_df_split)
+  collect_metrics(rf_test_results)
+
+    # Armazenar o modelo e melhores resultados na lista
+  player_models[[jogador]] <- list(grid_results = grid_results, best_results = best_results, rf_test_results = rf_test_results)
+
+}
+
+
+```
+
+```{r}
+# Inicializar uma lista vazia para armazenar os resultados finais
+combined_results <- list()
+
+# Loop para cada jogador e seus resultados
+for (i in 1:length(player_models)) {
+  jogador <- names(player_models)[i]  # Nome do jogador
+  best_result <- player_models[[i]]$best_result  # Melhor resultado do jogador
+  
+  # Adicionar o nome do jogador ao resultado e armazenar na lista combined_results
+  combined_results[[i]] <- c(Player = jogador, best_result)
+}
+
+# Converter a lista de resultados combinados em um data frame
+results2_df <- do.call(rbind, combined_results)
+
+# Exibir o data frame com os resultados
+results2_df
+
+
+```
+
+Com isso obtem-se os valores de mtry, trees e min_n para cada jogador que irão proporcionar os melhores resultados no modelo.
+
+```{r}
+# Salvar a lista player_models como arquivo RDS
+saveRDS(player_models, "data/player_models.rds")
+
+```
+
+Neste projeto, exploramos os desempenhos individuais dos jogadores da NBA por meio da modelagem estatística avançada. Utilizamos o algoritmo Random Forest para criar modelos de previsão personalizados para cada jogador, otimizando-os com base no coeficiente de determinação (R²). Os modelos mais bem-sucedidos foram selecionados e salvos em arquivos RDS, permitindo previsões precisas para futuras partidas. Essa abordagem não apenas destaca a eficácia das técnicas de aprendizado de máquina, mas também ressalta sua aplicabilidade na análise esportiva.

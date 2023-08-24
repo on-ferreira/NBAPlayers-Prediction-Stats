@@ -1,0 +1,11 @@
+"Player","Model","metric","value","config","rank"
+"terry_rozier","rand_forest","rsq",0.596983859335649,"Preprocessor1_Model16",2
+"jerami_grant","rand_forest","rsq",0.56010408686457,"Preprocessor1_Model18",1
+"nikola_jokic","rand_forest","rsq",0.543947319342485,"Preprocessor1_Model16",1
+"kelly_olynyk","rand_forest","rsq",0.508668622047598,"Preprocessor1_Model01",1
+"enes_freedom","rand_forest","rsq",0.505812183997782,"Preprocessor1_Model18",1
+"lou_williams","rand_forest","rsq",0.474610716993778,"Preprocessor1_Model18",1
+"kyle_anderson","rand_forest","rsq",0.459274758669899,"Preprocessor1_Model01",2
+"dwight_powell","rand_forest","rsq",0.428908699414421,"Preprocessor1_Model01",3
+"andre_drummond","rand_forest","rsq",0.413706850282811,"Preprocessor1_Model18",1
+"javale_mcgee","rand_forest","rsq",0.410115535408873,"Preprocessor1_Model18",1

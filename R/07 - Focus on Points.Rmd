@@ -426,7 +426,7 @@ Select the model with the best rank and metrics to further investigation
 
 rf_test_results <-
  race_results %>%
- extract_workflow("Cubist") %>%
+ extract_workflow("RF") %>%
  finalize_workflow(best_results) %>%
  last_fit(split = player_df_split)
 collect_metrics(rf_test_results)

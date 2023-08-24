@@ -1,0 +1,16 @@
+---
+title: "11 - Validating the models"
+output: html_document
+date: "2023-08-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Carregar a lista player_models de volta a partir do arquivo RDS
+loaded_player_models <- readRDS("data/player_models.rds")
+```
+
