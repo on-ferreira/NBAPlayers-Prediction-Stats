@@ -4,7 +4,7 @@ import time
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-SEASONS = 2023
+SEASONS = list(range(1977, 2015))
 
 DATA_DIR = "DATA"
 STANDINGS_DIR = os.path.join(DATA_DIR, "STANDINGS")
@@ -48,8 +48,8 @@ def scrape_season(season):
             f.write(html)
 
 
-#for season in SEASONS:
-scrape_season(2023)
+for season in SEASONS:
+    scrape_season(season)
 
 standings_files = os.listdir(STANDINGS_DIR)
 

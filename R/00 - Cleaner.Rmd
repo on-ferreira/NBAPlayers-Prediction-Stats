@@ -15,9 +15,9 @@ library(readr)
 
 ```{r reading csv}
 
-df <- read_csv("data/DFwithHourandLocation.csv")  
-df$'Unnamed: 16' <- NULL
+df <- read_csv("data/2016-2023-raw-csv.csv")  
 df$date <- as.Date(df$date)
+df$`Unnamed: 16`<-NULL
 
 # Trim spaces and replace with underscores in 'Name' column
 df$Name <- gsub(" ", "_", trimws(df$Name))
@@ -26,7 +26,13 @@ df$Name <- gsub(" ", "_", trimws(df$Name))
 df <- subset(df, !is.na(MP) & MP != 0)
 
 df
+
 ```
+```{r}
+problems(df)
+
+```
+
 Percebi que tenho um problema no DF original devido ao scrapping the identificado padrões idiomáticos diferentes, por exemplo temos como unique name 'nikola_joki?' e nikola_jokić que deveriam ser representados como um jogador e não como 2.
 
 
@@ -241,7 +247,7 @@ df
 Salvando o novo df em um CSV
 ```{r}
 #Saving the cleaned df
-write.csv(df, file = "data/cleanedData.csv", row.names = FALSE)
+write.csv(df, file = "data/2016-2023-cleaned-csv.csv", row.names = FALSE)
 
 ```
 
