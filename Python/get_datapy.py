@@ -4,7 +4,8 @@ import time
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-SEASONS = list(range(1977, 2015))
+#SEASONS = list(range(1977, 2015))
+SEASONS = []
 
 DATA_DIR = "DATA"
 STANDINGS_DIR = os.path.join(DATA_DIR, "STANDINGS")
