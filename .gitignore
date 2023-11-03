@@ -9,3 +9,6 @@ Python/DATA/
 .idea/
 R/.RData
 R/.RDataTmp
+PPS/
+Python/.ipynb_checkpoints
+R/data/.ipynb_checkpoints
