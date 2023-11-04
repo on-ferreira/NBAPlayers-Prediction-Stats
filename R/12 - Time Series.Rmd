@@ -2,6 +2,9 @@
 title: "12 - Time Series"
 output: html_document
 date: "2023-09-25"
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -35,13 +38,18 @@ df_merged
 write.csv(df_merged, file = "data/2016-2023-raw-csv.csv", row.names = FALSE)
 
 ```
-Após isso, passei o  "2016-2023-raw-csv.csv" no 00-Cleaner para que possa começar as análises das séries temporais.
+
+Após isso, passei o "2016-2023-raw-csv.csv" no 00-Cleaner para que possa
+começar as análises das séries temporais.
 
 ```{r, eval=FALSE}
 df <- read_csv("data/2016-2023-cleaned-csv.csv")
 df
 ```
-Vou selecionar os jogadores do top 10 para fazer a analise das série temporais deles, depois vou expandir a ideia para o resto dos jogadores.
+
+Vou selecionar os jogadores do top 10 para fazer a analise das série
+temporais deles, depois vou expandir a ideia para o resto dos jogadores.
+
 ```{r, eval=FALSE}
 top10 <- read_csv("data/top10.csv")
 
@@ -74,12 +82,18 @@ for (jogador in top10$Player) {
 }
 ```
 
-Minha ideia é de criar uma espécie personalizada de data: numero do jogo na season - mes da season - ano da season.
-Preciso entender melhor como isso vai performar dentro da TimeSeries, se colocar apenas numero do jogo - ano da season vai ser melhor.
+Minha ideia é de criar uma espécie personalizada de data: numero do jogo
+na season - mes da season - ano da season. Preciso entender melhor como
+isso vai performar dentro da TimeSeries, se colocar apenas numero do
+jogo - ano da season vai ser melhor.
 
-Antes disso, vou passar o df "data/2016-2023-cleaned-csv.csv" no pre-processamento do WTP, para ter as colunas que quero testar no arimaX, usando exogenous = Colunas do WTP.
+Antes disso, vou passar o df "data/2016-2023-cleaned-csv.csv" no
+pre-processamento do WTP, para ter as colunas que quero testar no
+arimaX, usando exogenous = Colunas do WTP.
 
-Vou manter as colunas originais do df, pensando em fazer uma multivariate timeseries para ter vários valores sobre a performance do jogador por jogo.
+Vou manter as colunas originais do df, pensando em fazer uma
+multivariate timeseries para ter vários valores sobre a performance do
+jogador por jogo.
 
 ```{r}
 df_wtp <- read_csv("data/2016-2023-wtp.csv")
@@ -111,7 +125,9 @@ ggplot(df_lebron, aes(x = GameNo, y = PTS, color = factor(season))) +
 
 ```
 
-Ficou muito dificil de entender o gráfico, olhando a principio me parece um gráfico de Noise stationary, vou plotar ano a ano para ter uma visão melhor.
+Ficou muito dificil de entender o gráfico, olhando a principio me parece
+um gráfico de Noise stationary, vou plotar ano a ano para ter uma visão
+melhor.
 
 ```{r}
 
@@ -125,7 +141,6 @@ ggplot(df_lebron, aes(x = GameNo, y = PTS, color = factor(season))) +
   facet_wrap(~ season, scales = "free")  # Cria um gráfico para cada temporada
 
 ```
-
 
 ```{r}
 unique_seasons <- unique(df_lebron$season)
@@ -151,8 +166,11 @@ for (s in unique_seasons) {
 ```
 
 Testando as bibliotecas xts forecast para modelos de time series.
-"Before we start using black-box deep learning models to solve the temperatureprediction problem, let’s try a simple, common-sense approach. It will serve as a sanity check, and it will establish a baseline that we’ll have to beat to
-demonstrate the usefulness of more-advanced machine learning models"
+"Before we start using black-box deep learning models to solve the
+temperatureprediction problem, let's try a simple, common-sense
+approach. It will serve as a sanity check, and it will establish a
+baseline that we'll have to beat to demonstrate the usefulness of
+more-advanced machine learning models"
 
 ```{r}
 
@@ -223,8 +241,18 @@ ggplot(combined_test_data, aes(x = Date, y = PTS, color = Type)) +
 
 ```
 
-
-O primeiro modelo se mostra bastante ineficaz, como esperado, vou refazer adicionando as colunas do wtp e ver se tem um resultado melhor ou pior. Achei um comentário interessante no stackoverflow sobre esse tipo de problema: "I understand your problem. I currently work on a similar problem. (We have appointment schedules which are recurrent every week, but the schedules are often overruled if required, meaning irregular time series). I switched to machine learning, implemented a boosted regression tree, but there are many others. Time series are only appropriate if you think time aspects are responsible for the noise in data, but there are often so many different factors, like maybe the weather, or the product type, or interaction terms between two variables that might explain part of the noise. "
+O primeiro modelo se mostra bastante ineficaz, como esperado, vou
+refazer adicionando as colunas do wtp e ver se tem um resultado melhor
+ou pior. Achei um comentário interessante no stackoverflow sobre esse
+tipo de problema: "I understand your problem. I currently work on a
+similar problem. (We have appointment schedules which are recurrent
+every week, but the schedules are often overruled if required, meaning
+irregular time series). I switched to machine learning, implemented a
+boosted regression tree, but there are many others. Time series are only
+appropriate if you think time aspects are responsible for the noise in
+data, but there are often so many different factors, like maybe the
+weather, or the product type, or interaction terms between two variables
+that might explain part of the noise."
 
 ```{r}
 
@@ -302,9 +330,11 @@ ggplot(combined_test_data, aes(x = Date, y = PTS, color = Type)) +
 
 ```
 
-
-Considerações:
-O modelo criado não lida muito bem com as altas volatilidades da pontuação de um jogador, enquanto as pontuações tendem a variar muito, o modelo tende a variar pouco, as vezes na mesma direção, as vezes em direções opostas. Fiz o teste com jogadores diferentes e acontece o mesmo com todos eles.
+Considerações: O modelo criado não lida muito bem com as altas
+volatilidades da pontuação de um jogador, enquanto as pontuações tendem
+a variar muito, o modelo tende a variar pouco, as vezes na mesma
+direção, as vezes em direções opostas. Fiz o teste com jogadores
+diferentes e acontece o mesmo com todos eles.
 
 ```{r}
 
@@ -359,12 +389,9 @@ normalize_input_data <- function(df) {
 normalized_train_df <- normalize_input_data(train_df)
 ```
 
-Dados do exemplo: 1 leitura a cada hora. sequence_length = 5 dias. Delay = 6 dias -1 hora
-sampling_rate <- 6
-sequence_length <- 120
-delay <- sampling_rate * (sequence_length + 24 - 1)
-batch_size <- 256
-
+Dados do exemplo: 1 leitura a cada hora. sequence_length = 5 dias. Delay
+= 6 dias -1 hora sampling_rate \<- 6 sequence_length \<- 120 delay \<-
+sampling_rate \* (sequence_length + 24 - 1) batch_size \<- 256
 
 ```{r}
 sampling_rate <- 6
@@ -407,10 +434,8 @@ test_dataset <- make_dataset(test_df)
 
 ```
 
-
-Seguindo os passos do livro "Deep Learning with R", primeiro fazemos um modelo simplista para ter como parametro de métricas.
-
-
+Seguindo os passos do livro "Deep Learning with R", primeiro fazemos um
+modelo simplista para ter como parametro de métricas.
 
 ```{r}
 library(tfdatasets)
@@ -451,7 +476,6 @@ cat("samples shape: ", format(samples$shape), "\n",
 
 
 ```
-
 
 ```{r}
 
@@ -502,8 +526,11 @@ sprintf("Test RMSE: %.2f", rmse)  # Print RMSE
 plot(history, metrics = "mae")
 ```
 
-
-Estou com problemas na arquitetura de rede neural convolucional abaixo, ValueError: One of the dimensions in the output is <= 0 due to downsampling in conv1d_23. Consider increasing the input size. Received input shape [None, 10, 37] which would produce output shape with a zero or negative value in a dimension.
+Estou com problemas na arquitetura de rede neural convolucional abaixo,
+ValueError: One of the dimensions in the output is \<= 0 due to
+downsampling in conv1d_23. Consider increasing the input size. Received
+input shape [None, 10, 37] which would produce output shape with a zero
+or negative value in a dimension.
 
 ```{r, eval=FALSE}
 
@@ -557,7 +584,6 @@ plot(history)
 
 ```
 
-
 ```{r}
 
 inputs <- layer_input(shape = c(sequence_length, ncol_input_data))
@@ -602,7 +628,6 @@ sprintf("Test RMSE: %.2f", rmse)  # Print RMSE
 
 plot(history)
 ```
-
 
 ```{r}
 #Listing 10.21 Training and evaluating a dropout-regularized LSTM
@@ -653,7 +678,6 @@ plot(history)
 
 ```
 
-
 ```{r}
 #Listing 10.22 Training and evaluating a dropout-regularized, stacked GRU model
 
@@ -702,10 +726,11 @@ plot(history)
 
 ```
 
+Lembrando que os resultados de nikola_jokic com o modelo de
+Random_Forest treinado tinha métricas de RMSE = 6.57 e RSQ = 28.77, logo
+chego a conclusão de que analisar levando em consideração o tempo, não
+esteja rendendo bons resultados.
 
-Lembrando que os resultados de nikola_jokic com o modelo de Random_Forest treinado tinha métricas de RMSE = 6.57 e RSQ = 28.77, logo chego a conclusão de que analisar levando em consideração o tempo, não esteja rendendo bons resultados.
-
-O modelo sarimax do auto.arima teve resultados mais significativos que as redes neurais. Isso me leva a dois pensamentos:
-- Menos é mais
-- Eu possivelmente fiz algo errado nas redes neurais
-
+O modelo sarimax do auto.arima teve resultados mais significativos que
+as redes neurais. Isso me leva a dois pensamentos: - Menos é mais - Eu
+possivelmente fiz algo errado nas redes neurais

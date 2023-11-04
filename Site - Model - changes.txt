@@ -1,0 +1,22 @@
+No Site:
+1 - Gráficos dos últimos X jogos onde cada jogo é uma barra e elas tem cores diferentes baseadas em um over/under especifico.
+
+2 - Textos escritos mostrando a média dos últimos X jogos/ X Seasons/ X jogos contra o time no passado
+
+3 - Fazer uma forma fluida de navegar entre jogadores
+
+
+--------
+No modelo:
+
+Modificar a coluna de Rest Days para categórico: 0 - Muito descansado, 1- descanso ok, 2- Sem descanso, 3- Jogos em dias seguidos [sem descanso at all] -> A coluna foi transformada em dados categóricos, mas sem número correspondente.
+
+Talvez criar uma coluna de PAR cedidos pelo time oponente por posição ao invés da coluna opp [tres colunas no caso], talvez na season passada [seja muito longo], algo melhor seria nos ultimos 5-10 jogos. 
+
+Manter as colunas criadas em R de L5 e L10? É interessante
+
+Ver uma forma de analisar os z-test ou t-test de coluna e analisar quais delas estão sendo boas para os modelos ou não.
+
+Continuar na pegada de selecionar alguns jogadores apenas e não todos?
+
+- Criar um modelo de classificação binary de over/under determinada linha.

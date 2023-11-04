@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>Select a Player and Input a Line Value</h1>
+    <form action="/generate_graph" method="POST">
+        <select name="player">
+            {% for player in player_list %}
+                <option value="{{ player }}">{{ player }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="line" placeholder="Enter a Line Value">
+        <label for="stats">Select a Statistic:</label>
+        <select name="stats" id="stats">
+            <option value="PTS">PTS</option>
+            <option value="AST">AST</option>
+            <option value="TRB">TRB</option>
+            <option value="STL">STL</option>
+            <option value="BLK">BLK</option>
+        </select>
+        <input type="submit" value="Generate Graph">
+    </form>
+</body>
+</html>
