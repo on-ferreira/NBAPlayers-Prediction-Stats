@@ -11,4 +11,5 @@ R/.RData
 R/.RDataTmp
 PPS/
 Python/.ipynb_checkpoints
+*.csv
 R/data/.ipynb_checkpoints

@@ -9,7 +9,8 @@ No Site:
 --------
 No modelo:
 
-Modificar a coluna de Rest Days para categórico: 0 - Muito descansado, 1- descanso ok, 2- Sem descanso, 3- Jogos em dias seguidos [sem descanso at all]
+Modificar a coluna de Rest Days para categórico: 0 - Muito descansado, 1- descanso ok, 2- Sem descanso, 3- Jogos em dias seguidos [sem descanso at all] -> A coluna foi transformada em dados categóricos, mas sem número correspondente.
+
 
 Talvez criar uma coluna de PAR cedidos pelo time oponente por posição ao invés da coluna opp [tres colunas no caso], talvez na season passada [seja muito longo], algo melhor seria nos ultimos 5-10 jogos. 
 
