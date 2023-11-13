@@ -4,11 +4,11 @@ from bs4 import BeautifulSoup
 import re
 import csv
 
-DAILY_DIR = "data/DAILYLINES"
+DATA_DIR = "data"
+DAILY_DIR = os.path.join(DATA_DIR, "DAILYLINES")
 
 player_props = os.listdir(DAILY_DIR)
 player_props = [os.path.join(DAILY_DIR, f) for f in player_props if f.endswith(".html")]
-
 
 def parse_html(pp):
     with open(pp, encoding=None, errors="replace") as f:
