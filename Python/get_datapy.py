@@ -48,6 +48,7 @@ def scrape_season(season):
             f.write(html)
 
 
+SEASONS = [2024]
 for season in SEASONS:
     scrape_season(season)
 
@@ -66,6 +67,7 @@ def scrape_game(standings_file):
     for url in box_scores:
         save_path = os.path.join(SCORES_DIR, url.split("/")[-1])
         if os.path.exists(save_path):
+            #Adicionar verificação se inner_html tem "No game played on this day" ou se não tem as boxscores
             continue
 
         html = get_html(url, "#content")
