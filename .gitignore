@@ -13,3 +13,9 @@ PPS/
 Python/.ipynb_checkpoints
 *.csv
 R/data/.ipynb_checkpoints
+Python/fill_db.py
+Python/create_sql_script.py
+Python/website/main_project/harvester/DATA/
+output_script.sql
+Python/website/main_project/harvester/DATA/TEAMS/
+harvester/DATA/TEAMS/
