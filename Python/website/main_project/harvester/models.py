@@ -3,6 +3,7 @@ from django.db import models
 
 class Team(models.Model):
     name = models.CharField(max_length=255)
+    abbreviation = models.CharField(max_length=5)
     head_coach = models.CharField(max_length=255)
     region = models.CharField(max_length=255)
 
@@ -28,7 +29,6 @@ class Game(models.Model):
     away_team = models.ForeignKey(Team, related_name='away_team', on_delete=models.CASCADE)
     location = models.CharField(max_length=255)
 
-
     def __str__(self):
         return f"{self.home_team} vs {self.away_team} on {self.date}"
 
@@ -36,6 +36,8 @@ class Game(models.Model):
 class GameStatistics(models.Model):
     game = models.ForeignKey(Game, on_delete=models.CASCADE)
     player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, related_name="team", on_delete=models.CASCADE)
+    opp = models.ForeignKey(Team, related_name="opp", on_delete=models.CASCADE)
     MP = models.IntegerField()
     FG = models.IntegerField()
     FGA = models.IntegerField()
