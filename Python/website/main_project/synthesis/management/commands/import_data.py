@@ -2,7 +2,7 @@ import os
 from bs4 import BeautifulSoup
 from datetime import datetime
 import csv
-from harvester.models import GameStatistics, Player, Game, Team
+from synthesis.models import GameStatistics, Player, Game, Team
 from django.core.management.base import BaseCommand
 import time
 
@@ -12,7 +12,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
 
-        DATA_DIR = "C:\\Users\\orlan\\OneDrive\\Documentos\\UFF\\NBAPlayers-Prediction-Stats\\Python\\website\\main_project\\harvester\\DATA"
+        DATA_DIR = "C:\\Users\\orlan\\OneDrive\\Documentos\\UFF\\NBAPlayers-Prediction-Stats\\Python\\DATA"
         TEAMS_DIR = os.path.join(DATA_DIR, "TEAMS")
 
         teams_extended = {
