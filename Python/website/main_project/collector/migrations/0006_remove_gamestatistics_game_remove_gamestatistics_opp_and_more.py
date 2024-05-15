@@ -5,7 +5,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("harvester", "0005_gamestatistics_opp_gamestatistics_team"),
+        ("collector", "0005_gamestatistics_opp_gamestatistics_team"),
     ]
 
     operations = [

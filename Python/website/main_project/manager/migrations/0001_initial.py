@@ -64,7 +64,7 @@ class Migration(migrations.Migration):
                 (
                     "team",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="synthesis.team"
+                        on_delete=django.db.models.deletion.CASCADE, to="manager.team"
                     ),
                 ),
             ],
@@ -105,7 +105,7 @@ class Migration(migrations.Migration):
                 (
                     "game",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="synthesis.game"
+                        on_delete=django.db.models.deletion.CASCADE, to="manager.game"
                     ),
                 ),
                 (
@@ -113,14 +113,14 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="opp",
-                        to="synthesis.team",
+                        to="manager.team",
                     ),
                 ),
                 (
                     "player",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
-                        to="synthesis.player",
+                        to="manager.player",
                     ),
                 ),
                 (
@@ -128,7 +128,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="team",
-                        to="synthesis.team",
+                        to="manager.team",
                     ),
                 ),
             ],
@@ -139,7 +139,7 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="away_team",
-                to="synthesis.team",
+                to="manager.team",
             ),
         ),
         migrations.AddField(
@@ -148,7 +148,7 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="home_team",
-                to="synthesis.team",
+                to="manager.team",
             ),
         ),
     ]

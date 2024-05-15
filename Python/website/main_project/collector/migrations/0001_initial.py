@@ -63,7 +63,7 @@ class Migration(migrations.Migration):
                 (
                     "team",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="harvester.team"
+                        on_delete=django.db.models.deletion.CASCADE, to="collector.team"
                     ),
                 ),
             ],
@@ -104,14 +104,14 @@ class Migration(migrations.Migration):
                 (
                     "game",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="harvester.game"
+                        on_delete=django.db.models.deletion.CASCADE, to="collector.game"
                     ),
                 ),
                 (
                     "player",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
-                        to="harvester.player",
+                        to="collector.player",
                     ),
                 ),
             ],
@@ -122,7 +122,7 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="away_team",
-                to="harvester.team",
+                to="collector.team",
             ),
         ),
         migrations.AddField(
@@ -131,7 +131,7 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="home_team",
-                to="harvester.team",
+                to="collector.team",
             ),
         ),
     ]

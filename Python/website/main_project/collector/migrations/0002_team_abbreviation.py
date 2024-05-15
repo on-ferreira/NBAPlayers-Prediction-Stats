@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("harvester", "0001_initial"),
+        ("collector", "0001_initial"),
     ]
 
     operations = [

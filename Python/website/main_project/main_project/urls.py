@@ -19,5 +19,5 @@ from django.urls import path, include
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path('synthesis/', include('synthesis.urls')),  # Adicione essa linha para incluir as URLs da aplicação "synthesis"
+    path('manager/', include('manager.urls')),  # Adicione essa linha para incluir as URLs da aplicação "manager"
 ]

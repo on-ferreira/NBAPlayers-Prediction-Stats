@@ -38,9 +38,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "analysis",
-    "harvester",
+    "collector",
     "monitor",
-    "synthesis",
+    "manager",
 ]
 
 MIDDLEWARE = [

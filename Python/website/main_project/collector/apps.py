@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class SynthesisConfig(AppConfig):
+class HarvesterConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "synthesis"
+    name = "collector"
