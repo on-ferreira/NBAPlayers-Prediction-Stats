@@ -1,15 +1,11 @@
-https://www.statmuse.com/nba/ask/jokic-last-5-games-vs-raptors
-
-Não achei o site que tem os gráficos no formato parecido com o que eu quero, então mandei uma foto de como é.
-
 Ver algum site ou alguma forma de definir se o time é fast-paced ou não. Pra colocar junto das estatísticas do jogador contra o time.
 
 Adicionar na página do jogador a média de PAR(Pontos, Assistencias, Rebotes) cedidos pelo time para jogadores da posição dele.
-
-Adicionar a posição do jogador nos dados do jogo.
 
 Adicionar gráficos no estilo.
 
 Procurar onde encontrar "assistencias em potencias" para o jogador.
 
-Escrever um campo: Over/Under em X dos últimos L10 jogos.
+
+Create team stats per game [both home and away]
+See how to use NBA official API to gather necessary data
